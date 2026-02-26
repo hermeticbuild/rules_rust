@@ -1,7 +1,7 @@
 """# rust_library.bzl"""
 
 load(
-    "//rust/private:rust.bzl",
+    "//rust:defs.bzl",
     _rust_library = "rust_library",
 )
 
