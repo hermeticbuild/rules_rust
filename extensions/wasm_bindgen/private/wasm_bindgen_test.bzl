@@ -140,7 +140,7 @@ def _rust_wasm_bindgen_test_binary_impl(ctx):
         skip_expanding_rustc_env = True,
     )
 
-    return crate_providers
+    return list(crate_providers.values())
 
 rust_wasm_bindgen_test_binary = rule(
     doc = "Rules for running [wasm-bindgen tests](https://rustwasm.github.io/wasm-bindgen/wasm-bindgen-test/index.html).",
