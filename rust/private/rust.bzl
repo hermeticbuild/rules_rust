@@ -969,7 +969,9 @@ _RUST_TEST_ATTRS = {
             When enabled, tests are executed via a wrapper script that:
             1. Enumerates tests using libtest's --list flag
             2. Sorts tests by name and partitions them across shards by stable name hash
-            3. Runs only the tests assigned to the current shard
+            3. Uses either Bazel's native TEST_TOTAL_SHARDS/TEST_SHARD_INDEX env
+               or explicit RULES_RUST_TEST_TOTAL_SHARDS/RULES_RUST_TEST_SHARD_INDEX env
+            4. Runs only the tests assigned to the current shard
 
             This attribute only has an effect when use_libtest_harness is True.
 

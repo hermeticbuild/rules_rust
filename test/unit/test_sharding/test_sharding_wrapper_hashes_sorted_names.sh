@@ -31,9 +31,9 @@ collect_mapping() {
             cd "$workdir"
             TEST_LIST_VARIANT="$variant" \
                 TEST_LIST_ORDER="$order" \
-                TEST_SHARD_INDEX="$shard" \
                 TEST_SHARD_OUTPUT="$shard_output" \
-                TEST_TOTAL_SHARDS=3 \
+                RULES_RUST_TEST_SHARD_INDEX="$shard" \
+                RULES_RUST_TEST_TOTAL_SHARDS=3 \
                 ./wrapper.sh
         )
 

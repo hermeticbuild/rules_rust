@@ -21,6 +21,11 @@
 set -euo pipefail
 
 TEST_BINARY="{{TEST_BINARY}}"
+# Native Bazel test sharding sets TEST_TOTAL_SHARDS/TEST_SHARD_INDEX. Explicit
+# shard test targets can set RULES_RUST_TEST_TOTAL_SHARDS/RULES_RUST_TEST_SHARD_INDEX
+# instead because Bazel may reserve TEST_* variables for its own test runner env.
+TOTAL_SHARDS="${RULES_RUST_TEST_TOTAL_SHARDS:-${TEST_TOTAL_SHARDS:-}}"
+SHARD_INDEX="${RULES_RUST_TEST_SHARD_INDEX:-${TEST_SHARD_INDEX:-}}"
 
 test_shard_index() {
     local test_name="$1"
@@ -39,16 +44,21 @@ test_shard_index() {
         hash=$(( ((hash ^ byte) * 16777619) & 0xffffffff ))
     done
 
-    echo $(( hash % TEST_TOTAL_SHARDS ))
+    echo $(( hash % TOTAL_SHARDS ))
 }
 
 # If sharding is not enabled, run test binary directly
-if [[ -z "${TEST_TOTAL_SHARDS:-}" ]]; then
+if [[ -z "${TOTAL_SHARDS}" || "${TOTAL_SHARDS}" == "0" ]]; then
     exec "./${TEST_BINARY}" "$@"
 fi
 
+if [[ -z "${SHARD_INDEX}" ]]; then
+    echo "TEST_SHARD_INDEX or RULES_RUST_TEST_SHARD_INDEX must be set when sharding is enabled" >&2
+    exit 1
+fi
+
 # Touch status file to advertise sharding support to Bazel
-if [[ -n "${TEST_SHARD_STATUS_FILE:-}" ]]; then
+if [[ -n "${TEST_SHARD_STATUS_FILE:-}" && "${TEST_TOTAL_SHARDS:-0}" != "0" ]]; then
     touch "${TEST_SHARD_STATUS_FILE}"
 fi
 
@@ -66,7 +76,7 @@ fi
 # so adding or removing one test does not move unrelated tests between shards.
 shard_tests=()
 while IFS= read -r test_name; do
-    if (( $(test_shard_index "$test_name") == TEST_SHARD_INDEX )); then
+    if (( $(test_shard_index "$test_name") == SHARD_INDEX )); then
         shard_tests+=("$test_name")
     fi
 done <<< "$test_list"

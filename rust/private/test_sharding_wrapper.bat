@@ -74,14 +74,32 @@ IF !FOUND_BINARY! EQU 0 (
     EXIT /B 1
 )
 
+@REM Native Bazel test sharding sets TEST_TOTAL_SHARDS/TEST_SHARD_INDEX.
+@REM Explicit shard test targets can set RULES_RUST_TEST_TOTAL_SHARDS/
+@REM RULES_RUST_TEST_SHARD_INDEX instead because Bazel may reserve TEST_*
+@REM variables for its own test runner env.
+SET TOTAL_SHARDS=%RULES_RUST_TEST_TOTAL_SHARDS%
+IF "%TOTAL_SHARDS%"=="" SET TOTAL_SHARDS=%TEST_TOTAL_SHARDS%
+SET SHARD_INDEX=%RULES_RUST_TEST_SHARD_INDEX%
+IF "%SHARD_INDEX%"=="" SET SHARD_INDEX=%TEST_SHARD_INDEX%
+
 @REM If sharding is not enabled, run test binary directly
-IF "%TEST_TOTAL_SHARDS%"=="" (
+IF "%TOTAL_SHARDS%"=="" (
+    !TEST_BINARY_PATH! %*
+    EXIT /B !ERRORLEVEL!
+)
+IF "%TOTAL_SHARDS%"=="0" (
     !TEST_BINARY_PATH! %*
     EXIT /B !ERRORLEVEL!
 )
 
+IF "%SHARD_INDEX%"=="" (
+    ECHO ERROR: TEST_SHARD_INDEX or RULES_RUST_TEST_SHARD_INDEX must be set when sharding is enabled
+    EXIT /B 1
+)
+
 @REM Touch status file to advertise sharding support to Bazel
-IF NOT "%TEST_SHARD_STATUS_FILE%"=="" (
+IF NOT "%TEST_SHARD_STATUS_FILE%"=="" IF NOT "%TEST_TOTAL_SHARDS%"=="" IF NOT "%TEST_TOTAL_SHARDS%"=="0" (
     TYPE NUL > "%TEST_SHARD_STATUS_FILE%"
 )
 
@@ -100,7 +118,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference = 'Stop';" ^
     "$tests = @(Get-Content -LiteralPath $env:TEMP_LIST | Where-Object { $_.EndsWith(': test') } | ForEach-Object { $_.Substring(0, $_.Length - 6) });" ^
     "[Array]::Sort($tests, [StringComparer]::Ordinal);" ^
-    "$totalShards = [uint32]$env:TEST_TOTAL_SHARDS; $shardIndex = [uint32]$env:TEST_SHARD_INDEX;" ^
+    "$totalShards = [uint32]$env:TOTAL_SHARDS; $shardIndex = [uint32]$env:SHARD_INDEX;" ^
     "foreach ($test in $tests) { $hash = [uint32]2166136261; foreach ($byte in [Text.Encoding]::UTF8.GetBytes($test)) { $hash = [uint32]((([uint64]($hash -bxor $byte)) * 16777619) -band 0xffffffff) }; if (($hash %% $totalShards) -eq $shardIndex) { $test } }" ^
     > "!TEMP_SHARD_LIST!"
 IF ERRORLEVEL 1 (
