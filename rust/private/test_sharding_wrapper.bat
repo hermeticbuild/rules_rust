@@ -132,12 +132,25 @@ IF NOT "%TEST_SHARD_STATUS_FILE%"=="" IF NOT "%TEST_TOTAL_SHARDS%"=="" IF NOT "%
     TYPE NUL > "%TEST_SHARD_STATUS_FILE%"
 )
 
-@REM Create a temporary file for test list
-SET TEMP_LIST=%TEMP%\rust_test_list_%RANDOM%.txt
-SET TEMP_SHARD_LIST=%TEMP%\rust_test_shard_%RANDOM%.txt
+@REM Create per-wrapper temporary files. Prefer Bazel's per-test temp directory;
+@REM when falling back to the shared temp directory, avoid %RANDOM%-only file
+@REM names that can collide across concurrently running Windows test shards.
+SET "TEMP_ROOT=%TEST_TMPDIR%"
+IF NOT DEFINED TEMP_ROOT SET "TEMP_ROOT=%TEMP%"
+IF NOT DEFINED TEMP_ROOT SET "TEMP_ROOT=."
+:CREATE_TEMP_DIR
+SET "TEMP_DIR=!TEMP_ROOT!\rust_test_sharding_!RANDOM!_!RANDOM!_!RANDOM!"
+MKDIR "!TEMP_DIR!" 2>NUL
+IF ERRORLEVEL 1 GOTO :CREATE_TEMP_DIR
+SET "TEMP_LIST=!TEMP_DIR!\list.txt"
+SET "TEMP_SHARD_LIST=!TEMP_DIR!\shard.txt"
 
 @REM Enumerate all tests using libtest's --list flag
 !TEST_BINARY_PATH! --list --format terse 2>NUL > "!TEMP_LIST!"
+IF ERRORLEVEL 1 (
+    RMDIR /S /Q "!TEMP_DIR!" 2>NUL
+    EXIT /B 1
+)
 
 @REM Sort tests by ordinal name and filter this shard by stable FNV-1a hash so
 @REM adding or removing one test does not move unrelated tests between shards.
@@ -153,8 +166,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
     "foreach ($test in $tests) { $hash = [uint32]2166136261; foreach ($byte in [Text.Encoding]::UTF8.GetBytes($test)) { $hash = [uint32](([uint64]($hash -bxor $byte) * $fnvPrime) -band $u32Mask) }; if (($hash %% $totalShards) -eq $shardIndex) { $test } }" ^
     > "!TEMP_SHARD_LIST!"
 IF ERRORLEVEL 1 (
-    DEL "!TEMP_LIST!" 2>NUL
-    DEL "!TEMP_SHARD_LIST!" 2>NUL
+    RMDIR /S /Q "!TEMP_DIR!" 2>NUL
     EXIT /B 1
 )
 
@@ -168,8 +180,7 @@ FOR /F "usebackq delims=" %%T IN ("!TEMP_SHARD_LIST!") DO (
     )
 )
 
-DEL "!TEMP_LIST!" 2>NUL
-DEL "!TEMP_SHARD_LIST!" 2>NUL
+RMDIR /S /Q "!TEMP_DIR!" 2>NUL
 
 @REM If no tests for this shard, exit successfully
 IF "!SHARD_TESTS!"=="" (

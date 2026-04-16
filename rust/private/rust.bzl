@@ -951,15 +951,6 @@ _RUST_TEST_ATTRS = {
     "env_inherit": attr.string_list(
         doc = "Specifies additional environment variables to inherit from the external environment when the test is executed by bazel test.",
     ),
-    "use_libtest_harness": attr.bool(
-        mandatory = False,
-        default = True,
-        doc = dedent("""\
-            Whether to use `libtest`. For targets using this flag, individual tests can be run by using the
-            [--test_arg](https://docs.bazel.build/versions/4.0.0/command-line-reference.html#flag--test_arg) flag.
-            E.g. `bazel test //src:rust_test --test_arg=foo::test::test_fn`.
-        """),
-    ),
     "experimental_enable_sharding": attr.bool(
         mandatory = False,
         default = False,
@@ -976,6 +967,15 @@ _RUST_TEST_ATTRS = {
             This attribute only has an effect when use_libtest_harness is True.
 
             This is experimental and may change in future releases.
+        """),
+    ),
+    "use_libtest_harness": attr.bool(
+        mandatory = False,
+        default = True,
+        doc = dedent("""\
+            Whether to use `libtest`. For targets using this flag, individual tests can be run by using the
+            [--test_arg](https://docs.bazel.build/versions/4.0.0/command-line-reference.html#flag--test_arg) flag.
+            E.g. `bazel test //src:rust_test --test_arg=foo::test::test_fn`.
         """),
     ),
     "_test_sharding_wrapper_unix": attr.label(
