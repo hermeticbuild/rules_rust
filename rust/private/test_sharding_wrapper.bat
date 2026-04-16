@@ -69,6 +69,35 @@ IF !FOUND_BINARY! EQU 0 IF DEFINED RUNFILES_DIR (
     )
 )
 
+@REM Try 4: manifest-based runfile lookup. This covers nested launchers that
+@REM execute the sharding wrapper from another test's runfiles tree.
+IF !FOUND_BINARY! EQU 0 (
+    SET "MANIFEST=!RUNFILES_MANIFEST_FILE!"
+    IF NOT DEFINED MANIFEST IF EXIST "%~f0.runfiles_manifest" SET "MANIFEST=%~f0.runfiles_manifest"
+    IF NOT DEFINED MANIFEST IF EXIST "%~dpn0.runfiles_manifest" SET "MANIFEST=%~dpn0.runfiles_manifest"
+    IF NOT DEFINED MANIFEST IF EXIST "%~f0.exe.runfiles_manifest" SET "MANIFEST=%~f0.exe.runfiles_manifest"
+
+    IF DEFINED MANIFEST IF EXIST "!MANIFEST!" (
+        SET "TEST_BINARY_MANIFEST_PATH=!TEST_BINARY_RAW!"
+        SET "TEST_BINARY_MANIFEST_PATH=!TEST_BINARY_MANIFEST_PATH:\=/!"
+        IF DEFINED TEST_WORKSPACE SET "TEST_BINARY_MANIFEST_WORKSPACE_PATH=!TEST_WORKSPACE!/!TEST_BINARY_MANIFEST_PATH!"
+        FOR /F "usebackq tokens=1,* delims= " %%A IN ("!MANIFEST!") DO (
+            IF "%%A"=="!TEST_BINARY_MANIFEST_PATH!" (
+                SET "TEST_BINARY_PATH=%%B"
+                SET FOUND_BINARY=1
+                GOTO :FOUND_TEST_BINARY
+            )
+            IF DEFINED TEST_BINARY_MANIFEST_WORKSPACE_PATH IF "%%A"=="!TEST_BINARY_MANIFEST_WORKSPACE_PATH!" (
+                SET "TEST_BINARY_PATH=%%B"
+                SET FOUND_BINARY=1
+                GOTO :FOUND_TEST_BINARY
+            )
+        )
+    )
+)
+
+:FOUND_TEST_BINARY
+
 IF !FOUND_BINARY! EQU 0 (
     ECHO ERROR: Could not find test binary at any expected location
     EXIT /B 1
