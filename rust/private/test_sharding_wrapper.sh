@@ -24,6 +24,9 @@ TEST_BINARY="{{TEST_BINARY}}"
 
 test_shard_index() {
     local test_name="$1"
+    # FNV-1a 32-bit hash. The initial value is the FNV offset basis, and
+    # 16777619 is the FNV prime. This gives a stable, cheap string hash without
+    # depending on platform-specific tools being present in the test sandbox.
     local hash=2166136261
     local byte
     local char

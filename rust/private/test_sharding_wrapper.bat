@@ -94,6 +94,8 @@ SET TEMP_SHARD_LIST=%TEMP%\rust_test_shard_%RANDOM%.txt
 
 @REM Sort tests by ordinal name and filter this shard by stable FNV-1a hash so
 @REM adding or removing one test does not move unrelated tests between shards.
+@REM In the PowerShell fragment below, 2166136261 is the 32-bit FNV offset basis
+@REM and 16777619 is the FNV prime.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
     "$ErrorActionPreference = 'Stop';" ^
     "$tests = @(Get-Content -LiteralPath $env:TEMP_LIST | Where-Object { $_.EndsWith(': test') } | ForEach-Object { $_.Substring(0, $_.Length - 6) });" ^
