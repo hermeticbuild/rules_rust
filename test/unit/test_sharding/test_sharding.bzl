@@ -1,6 +1,7 @@
 """Tests for rust_test sharding support."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//rust:defs.bzl", "rust_test")
 
 def _sharding_enabled_test(ctx):
@@ -68,6 +69,23 @@ def _test_sharding_targets():
         shard_count = 3,
     )
 
+    sh_test(
+        name = "test_sharding_wrapper_hashes_sorted_names",
+        srcs = ["test_sharding_wrapper_hashes_sorted_names.sh"],
+        args = [
+            "$(location //rust/private:test_sharding_wrapper.sh)",
+            "$(location :fake_libtest_binary.sh)",
+        ],
+        data = [
+            ":fake_libtest_binary.sh",
+            "//rust/private:test_sharding_wrapper.sh",
+        ],
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
+    )
+
 def test_sharding_test_suite(name):
     _test_sharding_targets()
 
@@ -76,6 +94,7 @@ def test_sharding_test_suite(name):
         tests = [
             ":sharding_enabled_test",
             ":sharding_disabled_test",
+            ":test_sharding_wrapper_hashes_sorted_names",
             ":sharded_integration_test",
         ],
     )

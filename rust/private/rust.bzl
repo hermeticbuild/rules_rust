@@ -968,7 +968,7 @@ _RUST_TEST_ATTRS = {
 
             When enabled, tests are executed via a wrapper script that:
             1. Enumerates tests using libtest's --list flag
-            2. Partitions tests across shards based on TEST_SHARD_INDEX/TEST_TOTAL_SHARDS
+            2. Sorts tests by name and partitions them across shards by stable name hash
             3. Runs only the tests assigned to the current shard
 
             This attribute only has an effect when use_libtest_harness is True.

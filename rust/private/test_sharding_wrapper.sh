@@ -15,11 +15,29 @@
 
 # Wrapper script for rust_test that enables Bazel test sharding support.
 # This script intercepts test execution, enumerates tests using libtest's
-# --list flag, partitions them by shard index, and runs only the relevant subset.
+# --list flag, partitions them by stable test-name hash, and runs only the
+# relevant subset.
 
 set -euo pipefail
 
 TEST_BINARY="{{TEST_BINARY}}"
+
+test_shard_index() {
+    local test_name="$1"
+    local hash=2166136261
+    local byte
+    local char
+    local i
+    local LC_ALL=C
+
+    for ((i = 0; i < ${#test_name}; i++)); do
+        char="${test_name:i:1}"
+        printf -v byte "%d" "'$char"
+        hash=$(( ((hash ^ byte) * 16777619) & 0xffffffff ))
+    done
+
+    echo $(( hash % TEST_TOTAL_SHARDS ))
+}
 
 # If sharding is not enabled, run test binary directly
 if [[ -z "${TEST_TOTAL_SHARDS:-}" ]]; then
@@ -31,24 +49,23 @@ if [[ -n "${TEST_SHARD_STATUS_FILE:-}" ]]; then
     touch "${TEST_SHARD_STATUS_FILE}"
 fi
 
-# Enumerate all tests using libtest's --list flag
+# Enumerate all tests using libtest's --list flag. Sort the list so execution
+# order does not depend on libtest's output order.
 # Output format: "test_name: test" - we need to strip the ": test" suffix
-test_list=$("./${TEST_BINARY}" --list --format terse 2>/dev/null | grep ': test$' | sed 's/: test$//' || true)
+test_list=$("./${TEST_BINARY}" --list --format terse 2>/dev/null | grep ': test$' | sed 's/: test$//' | LC_ALL=C sort || true)
 
 # If no tests found, exit successfully
 if [[ -z "$test_list" ]]; then
     exit 0
 fi
 
-# Filter tests for this shard
-# test_index % TEST_TOTAL_SHARDS == TEST_SHARD_INDEX
+# Filter tests for this shard. Use a stable name hash instead of list position
+# so adding or removing one test does not move unrelated tests between shards.
 shard_tests=()
-index=0
 while IFS= read -r test_name; do
-    if (( index % TEST_TOTAL_SHARDS == TEST_SHARD_INDEX )); then
+    if (( $(test_shard_index "$test_name") == TEST_SHARD_INDEX )); then
         shard_tests+=("$test_name")
     fi
-    ((index++)) || true
 done <<< "$test_list"
 
 # If no tests for this shard, exit successfully
