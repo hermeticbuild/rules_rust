@@ -890,6 +890,7 @@ def determine_lib_name(name, crate_type, toolchain, lib_hash = None):
     if (toolchain.target_triple and
         toolchain.target_os == "windows" and
         crate_type not in ("lib", "rlib") and
+        # GNU-like Windows staticlibs are archives named lib<crate>.a.
         (crate_type != "staticlib" or
          toolchain.target_abi not in ("gnu", "gnullvm"))):
         prefix = ""
