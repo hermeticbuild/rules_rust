@@ -99,16 +99,6 @@ load(
     _rustc_output_diagnostics = "rustc_output_diagnostics",
 )
 
-_MACOS_SDKROOT_BY_PLATFORM = select({
-    "@platforms//os:osx": "@macos_sdk//sysroot",
-    "//conditions:default": None,
-})
-
-def _add_macos_sdkroot(kwargs):
-    if kwargs.get("macos_sdkroot") == None:
-        kwargs["macos_sdkroot"] = _MACOS_SDKROOT_BY_PLATFORM
-    return kwargs
-
 def _rule_wrapper(rule):
     def _wrapped(name, deps = [], proc_macro_deps = [], **kwargs):
         rule(
@@ -116,7 +106,7 @@ def _rule_wrapper(rule):
             deps = deps + proc_macro_deps,
             # TODO(zbarsky): This attribute would ideally be called `exec_configured_deps` or similar.
             proc_macro_deps = deps + proc_macro_deps,
-            **_add_macos_sdkroot(kwargs)
+            **kwargs
         )
 
     return _wrapped
@@ -129,7 +119,7 @@ def _symbolic_rule_wrapper(rule, macro_fn):
             deps = deps + proc_macro_deps,
             # TODO(zbarsky): This attribute would ideally be called `exec_configured_deps` or similar.
             proc_macro_deps = deps + proc_macro_deps,
-            **_add_macos_sdkroot(kwargs)
+            **kwargs
         )
 
     return macro_fn(
