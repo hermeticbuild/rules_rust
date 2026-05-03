@@ -2389,6 +2389,18 @@ def _collect_nonstatic_linker_inputs(cc_info, include_final_link_requirements):
             ))
     return nonstatic_linker_inputs
 
+def _collect_dep_cc_infos(dep):
+    cc_infos = []
+    crate_group = getattr(dep, "crate_group_info", None)
+    if crate_group:
+        for group_dep in crate_group.dep_variant_infos.to_list():
+            if group_dep.cc_info:
+                cc_infos.append(group_dep.cc_info)
+    elif dep.cc_info:
+        cc_infos.append(dep.cc_info)
+
+    return cc_infos
+
 def _add_lto_flags(ctx, toolchain, args, crate):
     """Adds flags to an Args object to configure LTO for 'rustc'.
 
@@ -2528,12 +2540,12 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
 
     # Flattening is okay since crate_info.deps only records direct deps.
     for dep in crate_info.deps.to_list():
-        if dep.cc_info:
+        for dep_cc_info in _collect_dep_cc_infos(dep):
             # Static dependencies are bundled into both crate types. Shared libraries
             # remain final-link dependencies, as do a staticlib's user link flags.
             if crate_info.type in ["cdylib", "staticlib"]:
                 nonstatic_linker_inputs = _collect_nonstatic_linker_inputs(
-                    dep.cc_info,
+                    dep_cc_info,
                     include_final_link_requirements = crate_info.type == "staticlib",
                 )
                 if nonstatic_linker_inputs:
@@ -2542,7 +2554,7 @@ def establish_cc_info(ctx, attr, crate_info, toolchain, cc_toolchain, feature_co
                     )
                     cc_infos.append(CcInfo(linking_context = linking_context))
             else:
-                cc_infos.append(dep.cc_info)
+                cc_infos.append(dep_cc_info)
 
     if crate_info.type in ("rlib", "lib"):
         # We're an rlib or lib, which uses the default toolchain setting for std dylib linking.
