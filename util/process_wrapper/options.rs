@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use std::process::exit;
 
 use crate::flags::{FlagParseError, Flags, ParseOutcome};
+use crate::incremental_cache;
 use crate::rustc;
 use crate::util::*;
 

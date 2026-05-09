@@ -9,6 +9,7 @@ exports_files(["protoc_wrapper.rs"])
 
 current_prost_runtime(
     name = "current_prost_runtime",
+    tags = ["manual"],
 )
 
 bool_flag(
@@ -26,6 +27,7 @@ config_setting(
 alias(
     name = "protoc_wrapper",
     actual = "@rules_rs//rs/private/prost:protoc_wrapper",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -33,6 +35,7 @@ rust_test(
     name = "protoc_wrapper_test",
     crate = ":protoc_wrapper",
     edition = RUST_EDITION,
+    tags = ["manual"],
 )
 
 bzl_library(
@@ -49,6 +52,7 @@ bzl_library(
 
 rust_library_group(
     name = "prost_runtime",
+    tags = ["manual"],
     visibility = [
         "//extensions/prost:__subpackages__",
     ],
@@ -59,6 +63,7 @@ rust_library_group(
 
 rust_library_group(
     name = "tonic_runtime",
+    tags = ["manual"],
     visibility = [
         "//extensions/prost:__subpackages__",
     ],
@@ -78,6 +83,7 @@ rust_prost_toolchain(
     prost_plugin_flag = "--plugin=protoc-gen-prost=%s",
     prost_runtime = ":prost_runtime",
     prost_types = "//extensions/prost/private/3rdparty/crates:prost-types",
+    tags = ["manual"],
     tonic_plugin = "//extensions/prost/private/3rdparty/crates:protoc-gen-tonic__protoc-gen-tonic",
     tonic_plugin_flag = "--plugin=protoc-gen-tonic=%s",
     tonic_runtime = ":tonic_runtime",
@@ -85,5 +91,6 @@ rust_prost_toolchain(
 
 legacy_proto_toolchain(
     name = "legacy_proto_toolchain",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )

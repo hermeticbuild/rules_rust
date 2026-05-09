@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod flags;
+mod incremental_cache;
 mod options;
 mod output;
 mod rustc;
