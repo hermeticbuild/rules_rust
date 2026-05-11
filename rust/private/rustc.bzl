@@ -2786,10 +2786,19 @@ def _add_native_link_flags(
                         format_each = "-ldylib=%s",
                     )
                 else:
+                    # args.add_all(
+                    #     runtime_libs,
+                    #     format_each = "-Clink-arg=%s",
+                    # )
+                    # Explicitly use `-l:{}` syntax to link the exact library file to support versioned runtime libs.
                     args.add_all(
-                        runtime_libs,
-                        format_each = "-Clink-arg=%s",
+                        [lib.basename for lib in runtime_libs.to_list()],
+                        format_each = "-Clink-arg=-l:%s"
                     )
+                    if runtime_libs:
+                        print(runtime_libs.to_list())
+                        print(args)
+                        fail("Testing...")
         else:
             args.add_all(
                 runtime_libs,
