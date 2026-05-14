@@ -541,6 +541,77 @@ def incompatible_do_not_include_transitive_data_in_compile_inputs():
         issue = "https://github.com/bazelbuild/rules_rust/issues/3915",
     )
 
+def experimental_rustc_incremental():
+    """Enable rustc incremental compilation via process_wrapper injection.
+
+    When enabled, `process_wrapper` injects `-Cincremental=<dir>` into every
+    rustc invocation. The cache directory lives under the Bazel output_base at
+    `<output_base>/.rustc_incremental_cache/`, so state persists across builds
+    and is shared across all concurrent compilations.
+
+    This is **non-hermetic** and **local-only**. Rustc's emitted artifacts may
+    vary with cache state, the cache directory is an undeclared input/output
+    that Bazel cannot track, and incremental output is not bit-identical to a
+    non-incremental compile of the same sources even for deterministic crates
+    (rustc raises the default `-Ccodegen-units` to 256 in incremental mode,
+    which changes CGU partitioning and therefore codegen). Release builds that
+    are sensitive to runtime performance should not enable this.
+
+    Incompatible with `experimental_use_cc_common_link` (the object-emitting
+    link path is incompatible with `-Cincremental`).
+
+    ## Recommended .bazelrc snippet
+
+    ```
+    # --config=dev-inc: local-only incremental rebuilds via rustc -Cincremental
+    # NOT safe for CI or remote — produces non-hermetic, perf-degraded outputs
+    build:dev-inc --@rules_rust//rust/settings:experimental_rustc_incremental=true
+    build:dev-inc --strategy=Rustc=local
+    build:dev-inc --strategy=RustcMetadata=local
+    build:dev-inc --remote_upload_local_results=false
+    ```
+
+    Then invoke: `bazel build --config=dev-inc //some:target`.
+
+    Why each flag matters:
+
+    - `experimental_rustc_incremental=true` turns on `-Cincremental` injection.
+      Because this is a `bool_flag`, toggling it produces a distinct
+      configuration hash, so the Bazel disk cache does not mix incremental and
+      non-incremental outputs and can stay enabled.
+    - `--strategy=Rustc=local` / `--strategy=RustcMetadata=local` are required
+      because the cache lives outside any sandbox; sandboxed strategies would
+      block writes. Both mnemonics needed when pipelined compilation is on.
+    - `--remote_upload_local_results=false` stops non-hermetic rlibs from
+      poisoning a shared remote cache. Remote reads are still fine.
+
+    Works transparently alongside `pipelined_compilation=hollow_rlib`.
+
+    ## Runtime-perf caveat
+
+    `-Cincremental` raises the default `-Ccodegen-units` from 16 to 256. LLVM
+    loses cross-CGU inlining opportunities, and ThinLTO can only partially
+    recover them. For opt builds this can materially slow the resulting binary
+    — stick to `--config=dev-inc` on dev machines and keep CI/release builds
+    on the non-incremental path.
+
+    ## Cache eviction
+
+    The cache grows unbounded. There is no automatic eviction today. To clear
+    it manually:
+
+    ```
+    rm -rf "$(bazel info output_base)/.rustc_incremental_cache"
+    ```
+
+    `bazel clean --expunge` also removes it (by removing the whole output_base)
+    but is heavier than necessary if that is all you want to drop.
+    """
+    bool_flag(
+        name = "experimental_rustc_incremental",
+        build_setting_default = False,
+    )
+
 def codegen_units():
     """The default value for `--codegen-units` which also affects resource allocation for rustc actions.
 

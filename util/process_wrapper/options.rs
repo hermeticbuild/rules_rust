@@ -70,6 +70,7 @@ pub(crate) fn options() -> Result<Options, OptionError> {
     let mut rustc_output_format_raw = None;
     let mut flags = Flags::new();
     let mut require_explicit_unstable_features = None;
+    let mut inject_incremental_cache = None;
     flags.define_repeated_flag("--subst", "", &mut subst_mapping_raw);
     flags.define_flag("--stable-status-file", "", &mut stable_status_file_raw);
     flags.define_flag("--volatile-status-file", "", &mut volatile_status_file_raw);
@@ -129,6 +130,13 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         "If set, an empty -Zallow-features= will be added to the rustc command line whenever no \
          other -Zallow-features= is present in the rustc flags.",
         &mut require_explicit_unstable_features,
+    );
+    flags.define_flag(
+        "--inject-incremental-cache",
+        "If set, computes a cache directory under the given base (relative paths are resolved \
+         against the Bazel output_base) and injects -Cincremental=<dir> into the child command. \
+         Intended for local-only builds; produces non-hermetic outputs.",
+        &mut inject_incremental_cache,
     );
 
     let mut child_args = match flags
@@ -287,9 +295,23 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         )
     })?;
 
+    let mut child_arguments: Vec<String> = args.to_vec();
+    if let Some(base_arg) = inject_incremental_cache {
+        let base = incremental_cache::resolve_cache_base(&base_arg);
+        let arg_refs: Vec<&str> = child_arguments.iter().map(String::as_str).collect();
+        let dir = incremental_cache::incremental_cache_dir(exec_path, &arg_refs, &base);
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            OptionError::Generic(format!(
+                "failed to create incremental cache directory {}: {e}",
+                dir.display()
+            ))
+        })?;
+        child_arguments.push(format!("-Cincremental={}", dir.display()));
+    }
+
     Ok(Options {
         executable: exec_path.to_owned(),
-        child_arguments: args.to_vec(),
+        child_arguments,
         child_environment: vars,
         touch_file,
         copy_output,

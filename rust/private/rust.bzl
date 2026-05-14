@@ -685,6 +685,9 @@ RUSTC_ATTRS = {
     "_rustc_output_diagnostics": attr.label(
         default = Label("//rust/settings:rustc_output_diagnostics"),
     ),
+    "_experimental_rustc_incremental": attr.label(
+        default = Label("//rust/settings:experimental_rustc_incremental"),
+    ),
 }
 
 _COMMON_ATTRS = {
