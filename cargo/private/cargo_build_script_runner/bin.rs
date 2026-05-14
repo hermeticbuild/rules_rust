@@ -72,12 +72,24 @@ fn run_buildrs() -> Result<(), String> {
             let file_name = path
                 .file_name()
                 .ok_or_else(|| "Failed while getting file name".to_string())?;
+
+            // Skip exposing the workspace's `.git` directory to build scripts.
+            // Some crates (notably `ring` ≤ 0.17.x) probe for `.git` to decide
+            // whether they are being built in a "local hacking" mode that
+            // requires extra build-time tooling (perl, nasm). Crate releases
+            // strip `.git` for exactly this reason; symlinking the workspace's
+            // `.git` back in breaks that contract.
+            if file_name == ".git" {
+                continue;
+            }
             let link = manifest_dir.join(file_name);
 
-            symlink_if_not_exists(&path, &link)
+            let created = symlink_if_not_exists(&path, &link)
                 .map_err(|err| format!("Failed to symlink {path:?} to {link:?}: {err}"))?;
 
-            exec_root_links.push(link)
+            if created {
+                exec_root_links.push(link);
+            }
         }
     }
 
@@ -311,17 +323,16 @@ fn should_symlink_exec_root() -> bool {
 }
 
 /// Create a symlink from `link` to `original` if `link` doesn't already exist.
-fn symlink_if_not_exists(original: &Path, link: &Path) -> Result<(), String> {
-    symlink(original, link)
-        .or_else(swallow_already_exists)
-        .map_err(|err| format!("Failed to create symlink: {err}"))
-}
-
-fn swallow_already_exists(err: std::io::Error) -> std::io::Result<()> {
-    if err.kind() == std::io::ErrorKind::AlreadyExists {
-        Ok(())
-    } else {
-        Err(err)
+/// Create a symlink from `link` to `original` if `link` doesn't already exist.
+/// Returns `Ok(true)` when the symlink was created, `Ok(false)` when `link`
+/// already existed (the caller should not later try to remove it, since it
+/// may be a real directory placed there by another step such as runfiles
+/// staging — `remove_dir` on a non-empty real directory would fail).
+fn symlink_if_not_exists(original: &Path, link: &Path) -> Result<bool, String> {
+    match symlink(original, link) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(err) => Err(format!("Failed to create symlink: {err}")),
     }
 }
 

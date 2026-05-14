@@ -214,6 +214,19 @@ fn consolidate_dependency_search_paths(
             let file_name_lower = file_name
                 .to_string_lossy()
                 .to_ascii_lowercase();
+
+            // Skip rustc codegen-unit intermediates. These can appear in a
+            // pipelined sibling action's output directory while a parent
+            // `RustcMetadata` action is reading it, and they are not useful
+            // as link dependencies anyway. They also sometimes vanish between
+            // `read_dir` and the hardlink/copy below, which would otherwise
+            // surface as a hard build failure.
+            if file_name_lower.ends_with(".rcgu.o")
+                || file_name_lower.ends_with(".rcgu.bc")
+                || file_name_lower.ends_with(".rcgu.bc.z")
+            {
+                continue;
+            }
             if !seen.insert(file_name_lower) {
                 continue;
             }
@@ -230,14 +243,29 @@ fn consolidate_dependency_search_paths(
                         dest.display(),
                         err
                     );
-                    fs::copy(&src, &dest).map_err(|copy_err| {
-                        ProcessWrapperError(format!(
-                            "unable to copy {} into unified dependency dir {}: {}",
-                            src.display(),
-                            dest.display(),
-                            copy_err
-                        ))
-                    })?;
+                    match fs::copy(&src, &dest) {
+                        Ok(_) => {}
+                        // Tolerate files that disappeared between `read_dir`
+                        // and copy. Pipelined sibling actions can finish and
+                        // garbage-collect their temporary outputs in this
+                        // window; missing those files is harmless because
+                        // they are not real link inputs.
+                        Err(copy_err) if copy_err.kind() == std::io::ErrorKind::NotFound => {
+                            debug_log!(
+                                "skipping {}: vanished before copy ({})",
+                                src.display(),
+                                copy_err
+                            );
+                        }
+                        Err(copy_err) => {
+                            return Err(ProcessWrapperError(format!(
+                                "unable to copy {} into unified dependency dir {}: {}",
+                                src.display(),
+                                dest.display(),
+                                copy_err
+                            )));
+                        }
+                    }
                 }
             }
         }
