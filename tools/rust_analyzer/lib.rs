@@ -15,19 +15,18 @@ pub const WORKSPACE_ROOT_FILE_NAMES: &[&str] =
 
 pub const BUILD_FILE_NAMES: &[&str] = &["BUILD.bazel", "BUILD"];
 
-/// Install a symlink at `<workspace>/.bazel_rust_flycheck` pointing at the
-/// bundled `flycheck` binary so rust-analyzer can invoke it directly via
-/// `check.overrideCommand`. The indirection sidesteps bzlmod
-/// canonical-repo-name fragility (the symlink target is resolved here, where
-/// canonical names are fully knowable).
+/// Install a symlink at `<workspace>/bazel-rust-flycheck` pointing at the
+/// bundled `flycheck` binary, giving rust-analyzer a fixed path to call from
+/// `check.overrideCommand`.
 ///
-/// Lives at workspace root rather than under `bazel-out` because the
-/// `bazel-out` convenience symlink retargets when a different bazel command
-/// runs against a different `--output_base`. Monorepos commonly run their IDE
-/// bazel under a dedicated output_base separate from CLI bazel, which would
-/// strand the symlink and break flycheck whenever a CLI build ran between
-/// discoveries. Workspace root is stable across output_base switches;
-/// consumers gitignore via their existing `.gitignore` entry.
+/// We can't point the editor config straight at the binary: it lives deep under
+/// `bazel-out` behind bzlmod canonical repo names that can't be hand-written. So
+/// we resolve it here instead.
+///
+/// The alias goes at the workspace root rather than under `bazel-out`, which
+/// retargets across output_bases (common in monorepos that give the editor its
+/// own) and would strand it. The `bazel-` prefix keeps it covered by the usual
+/// `bazel-*` gitignore, so no new ignore entry is needed.
 pub fn install_flycheck_symlink(
     workspace: &Utf8Path,
     flycheck_rlocationpath: &str,
@@ -42,7 +41,7 @@ pub fn install_flycheck_symlink(
     let resolved = binary
         .canonicalize_utf8()
         .with_context(|| format!("failed to canonicalize {binary}"))?;
-    let symlink_path = workspace.join(".bazel_rust_flycheck");
+    let symlink_path = workspace.join("bazel-rust-flycheck");
     match fs::remove_file(&symlink_path) {
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
