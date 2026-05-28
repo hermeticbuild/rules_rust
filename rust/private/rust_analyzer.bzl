@@ -170,9 +170,9 @@ def _rust_analyzer_aspect_impl(target, ctx):
         "rust_generated_srcs": depset(transitive = rust_generated_srcs),
     }
 
-    # Capture the Rustc action's argv + env so external tools (e.g. an editor
-    # flycheck shim) can replay a metadata-only typecheck of this crate
-    # directly, without paying a `bazel build` round-trip per save.
+    # Capture the Rustc action's argv + env so an editor's flycheck can replay a
+    # metadata-only typecheck of this crate directly, without a `bazel build`
+    # round-trip per save.
     check_command_file = _write_check_command(ctx, target)
     if check_command_file:
         output_groups["rust_analyzer_check_command"] = depset([check_command_file])
