@@ -195,8 +195,6 @@ def _write_check_command(ctx, target):
     if argv == None:
         return None
 
-    env = {k: v for k, v in rustc_action.env.items()} if rustc_action.env else {}
-
     output = ctx.actions.declare_file(
         "{}.rust_analyzer_check_command.json".format(ctx.label.name),
     )
@@ -205,7 +203,7 @@ def _write_check_command(ctx, target):
         content = json.encode_indent(
             {
                 "argv": _transform_argv_for_check(argv),
-                "env": env,
+                "env": rustc_action.env or {},
             },
             indent = " " * 4,
         ),
@@ -213,25 +211,20 @@ def _write_check_command(ctx, target):
     return output
 
 def _transform_argv_for_check(argv):
-    """Rewrite a build-mode rustc argv into a metadata-only typecheck argv.
+    """Rewrite the captured build argv for a metadata-only typecheck, with
+    diagnostics in JSON for the editor to parse.
     """
     transformed = []
-    skip = False
     for arg in argv:
-        if skip:
-            skip = False
-            continue
         if arg.startswith("--emit="):
             transformed.append("--emit=metadata")
-            continue
-        if arg == "--emit":
-            transformed.append("--emit=metadata")
-            skip = True
-            continue
-        if arg == "--error-format=human" or arg.startswith("--error-format="):
+        elif arg.startswith("--error-format="):
             transformed.append("--error-format=json")
+        elif arg.startswith("--color="):
+            # Incompatible with the --error-format=json we force above.
             continue
-        transformed.append(arg)
+        else:
+            transformed.append(arg)
     return transformed
 
 def find_proc_macro_dylib(toolchain, target):
