@@ -1,5 +1,4 @@
 use std::{
-    env,
     fs::OpenOptions,
     io::{BufWriter, ErrorKind},
 };
@@ -7,7 +6,9 @@ use std::{
 use anyhow::{bail, Context};
 use camino::Utf8PathBuf;
 use clap::Parser;
-use gen_rust_project_lib::{bazel_info, generate_rust_project, install_flycheck_symlink};
+use gen_rust_project_lib::{
+    bazel_info, generate_rust_project, install_flycheck_symlink, maybe_run_flycheck,
+};
 
 fn write_rust_project() -> anyhow::Result<()> {
     let Config {
@@ -21,7 +22,7 @@ fn write_rust_project() -> anyhow::Result<()> {
 
     let rules_rust_name = env!("ASPECT_REPOSITORY");
 
-    if let Err(error) = install_flycheck_symlink(&workspace, env!("FLYCHECK_RLOCATIONPATH")) {
+    if let Err(error) = install_flycheck_symlink(&workspace) {
         log::warn!("failed to install flycheck symlink: {error}");
     }
 
@@ -62,6 +63,10 @@ fn write_rust_project() -> anyhow::Result<()> {
 // It would be more convenient if it could automatically discover all the rust code in the workspace if this target
 // does not exist.
 fn main() -> anyhow::Result<()> {
+    if maybe_run_flycheck() {
+        return Ok(());
+    }
+
     env_logger::init();
 
     // Write rust-project.json.

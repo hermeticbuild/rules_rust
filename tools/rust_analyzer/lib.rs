@@ -1,12 +1,14 @@
 mod aquery;
+mod flycheck;
 mod rust_project;
 
-use std::{collections::BTreeMap, convert::TryInto, fs, path::Path, process::Command};
+use std::{collections::BTreeMap, convert::TryInto, fs, process::Command};
 
 use anyhow::{bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use runfiles::Runfiles;
 use rust_project::RustProject;
+pub use flycheck::{install_flycheck_symlink, maybe_run_flycheck};
 pub use rust_project::{DiscoverProject, RustAnalyzerArg};
 use serde::{de::DeserializeOwned, Deserialize};
 
@@ -14,56 +16,6 @@ pub const WORKSPACE_ROOT_FILE_NAMES: &[&str] =
     &["MODULE.bazel", "REPO.bazel", "WORKSPACE.bazel", "WORKSPACE"];
 
 pub const BUILD_FILE_NAMES: &[&str] = &["BUILD.bazel", "BUILD"];
-
-/// Install a symlink at `<workspace>/bazel-rust-flycheck` pointing at the
-/// bundled `flycheck` binary, giving rust-analyzer a fixed path to call from
-/// `check.overrideCommand`.
-///
-/// We can't point the editor config straight at the binary: it lives deep under
-/// `bazel-out` behind bzlmod canonical repo names that can't be hand-written. So
-/// we resolve it here instead.
-///
-/// The alias goes at the workspace root rather than under `bazel-out`, which
-/// retargets across output_bases (common in monorepos that give the editor its
-/// own) and would strand it. The `bazel-` prefix keeps it covered by the usual
-/// `bazel-*` gitignore, so no new ignore entry is needed.
-pub fn install_flycheck_symlink(
-    workspace: &Utf8Path,
-    flycheck_rlocationpath: &str,
-) -> anyhow::Result<()> {
-    let runfiles = Runfiles::create().context("failed to load runfiles")?;
-    let binary: Utf8PathBuf = runfiles
-        .rlocation(flycheck_rlocationpath)
-        .with_context(|| {
-            format!("flycheck binary runfile not found: {flycheck_rlocationpath}")
-        })?
-        .try_into()?;
-    let resolved = binary
-        .canonicalize_utf8()
-        .with_context(|| format!("failed to canonicalize {binary}"))?;
-    let symlink_path = workspace.join("bazel-rust-flycheck");
-    match fs::remove_file(&symlink_path) {
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to remove {symlink_path}"));
-        }
-    }
-    symlink_to_file(resolved.as_std_path(), symlink_path.as_std_path())
-        .with_context(|| format!("failed to symlink {symlink_path} -> {resolved}"))?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn symlink_to_file(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
-}
-
-#[cfg(windows)]
-fn symlink_to_file(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::windows::fs::symlink_file(target, link)
-}
 
 #[allow(clippy::too_many_arguments)]
 pub fn generate_rust_project(

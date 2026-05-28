@@ -2,18 +2,15 @@
 //! See [rust-analyzer documentation][rd] for a thorough description of this interface.
 //! [rd]: <https://rust-analyzer.github.io/manual.html#rust-analyzer.workspace.discoverConfig>.
 
-use std::{
-    env,
-    io::{self, Write},
-};
+use std::io::{self, Write};
 
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use env_logger::{fmt::Formatter, Target, WriteStyle};
 use gen_rust_project_lib::{
-    bazel_info, generate_rust_project, install_flycheck_symlink, DiscoverProject, RustAnalyzerArg,
-    BUILD_FILE_NAMES, WORKSPACE_ROOT_FILE_NAMES,
+    bazel_info, generate_rust_project, install_flycheck_symlink, maybe_run_flycheck,
+    DiscoverProject, RustAnalyzerArg, BUILD_FILE_NAMES, WORKSPACE_ROOT_FILE_NAMES,
 };
 use log::{LevelFilter, Record};
 
@@ -44,7 +41,7 @@ fn project_discovery() -> anyhow::Result<DiscoverProject<'static>> {
 
     log::info!("got rust-analyzer argument: {rust_analyzer_argument:?}");
 
-    if let Err(error) = install_flycheck_symlink(&workspace, env!("FLYCHECK_RLOCATIONPATH")) {
+    if let Err(error) = install_flycheck_symlink(&workspace) {
         log::warn!("failed to install flycheck symlink: {error}");
     }
 
@@ -88,6 +85,10 @@ where
 }
 
 fn main() -> anyhow::Result<()> {
+    if maybe_run_flycheck() {
+        return Ok(());
+    }
+
     let log_format_fn = |fmt: &mut Formatter, rec: &Record| {
         let message = rec.args();
         let discovery = DiscoverProject::Progress { message };
