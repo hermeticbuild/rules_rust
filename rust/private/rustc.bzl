@@ -2655,17 +2655,26 @@ def establish_cc_info(
                     },
                 )
 
-            library_to_link = cc_common.create_library_to_link(
+            library_to_link_kwargs = dict(
                 actions = ctx.actions,
                 feature_configuration = feature_configuration,
                 cc_toolchain = cc_toolchain,
-                objects = [lto_object] if lto_object else None,
-                pic_objects = [lto_object] if lto_object else None,
-                lto_compilation_context = lto_compilation_context,
-                pic_lto_compilation_context = lto_compilation_context,
                 alwayslink = getattr(attr, "alwayslink", False),
                 **kwargs
             )
+            if lto_object:
+                if use_pic:
+                    library_to_link_kwargs.update({
+                        "pic_objects": [lto_object],
+                        "pic_lto_compilation_context": lto_compilation_context,
+                    })
+                else:
+                    library_to_link_kwargs.update({
+                        "objects": [lto_object],
+                        "lto_compilation_context": lto_compilation_context,
+                    })
+
+            library_to_link = cc_common.create_library_to_link(**library_to_link_kwargs)
     elif crate_info.type == "cdylib":
         if cc_toolchain:
             library_to_link = cc_common.create_library_to_link(
