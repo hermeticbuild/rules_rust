@@ -9,6 +9,12 @@ load(
 )
 load("//rust:defs.bzl", "rust_binary")
 
+_TARGET_COMPILATION_MODE = select({
+    str(Label("//cargo/private:compilation_mode_dbg")): "dbg",
+    str(Label("//cargo/private:compilation_mode_fastbuild")): "fastbuild",
+    str(Label("//cargo/private:compilation_mode_opt")): "opt",
+})
+
 def _sanitize_tristate(value):
     """Coerce a user-provided value to the rule's `-1`/`0`/`1` tri-state `int` shape.
 
@@ -245,6 +251,7 @@ def cargo_build_script(
         data_runfiles = ":{}-".format(name),
         data = data,
         tools = tools,
+        target_compilation_mode = _TARGET_COMPILATION_MODE,
         crate_features = crate_features,
         version = version,
         allow_build_script_to_detect_nonhermetic_paths = allow_build_script_to_detect_nonhermetic_paths,
@@ -254,7 +261,6 @@ def cargo_build_script(
         use_cc_toolchain = sanitized_use_cc_toolchain,
         use_default_shell_env = sanitized_use_default_shell_env,
         links = links,
-        deps = deps,
         link_deps = link_deps,
         rustc_flags = rustc_flags,
         visibility = visibility,
