@@ -653,22 +653,25 @@ def _cargo_build_script_impl(ctx):
     ]
 
 _COMPILATION_MODE = "//command_line_option:compilation_mode"
+_FEATURES = "//command_line_option:features"
+_USE_EXEC_FEATURES = "rules_rust_use_exec_features"
 
-def _cargo_build_script_compilation_mode_transition_impl(_settings, attr):
+def _cargo_build_script_exec_transition_impl(settings, attr):
     return {
         _COMPILATION_MODE: attr.target_compilation_mode,
+        _FEATURES: settings[_FEATURES] + [_USE_EXEC_FEATURES],
     }
 
-_cargo_build_script_compilation_mode_transition = transition(
-    implementation = _cargo_build_script_compilation_mode_transition_impl,
-    inputs = [],
-    outputs = [_COMPILATION_MODE],
+_cargo_build_script_exec_transition = transition(
+    implementation = _cargo_build_script_exec_transition_impl,
+    inputs = [_FEATURES],
+    outputs = [_COMPILATION_MODE, _FEATURES],
 )
 
 def _get_cargo_build_script_cfg():
     build_script_cfg = config.exec()
     if hasattr(build_script_cfg, "and_then"):
-        build_script_cfg = build_script_cfg.and_then(_cargo_build_script_compilation_mode_transition)
+        build_script_cfg = build_script_cfg.and_then(_cargo_build_script_exec_transition)
     return build_script_cfg
 
 _cargo_build_script_cfg = _get_cargo_build_script_cfg()

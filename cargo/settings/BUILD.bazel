@@ -37,4 +37,9 @@ experimental_symlink_execroot()
 
 use_default_shell_env()
 
+config_setting(
+    name = "use_exec_features_enabled",
+    values = {"features": "rules_rust_use_exec_features"},
+)
+
 out_dir_volatile_file_basenames()
