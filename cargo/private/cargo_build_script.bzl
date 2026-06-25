@@ -187,8 +187,8 @@ def _prefix_pwd_to_paths(args):
     return res
 
 def _pwd_flags_sysroot(args):
-    """Prefix execroot-relative paths in --sysroot= arguments with ${pwd}."""
-    return _prefix_pwd_to_flag(args, ["--sysroot="])
+    """Prefix execroot-relative paths in sysroot arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["--sysroot=", "--sysroot", "-isysroot"])
 
 def _pwd_flags_fsanitize_ignorelist(args):
     """Prefix execroot-relative paths in -fsanitize-ignorelist= arguments with ${pwd}."""
