@@ -3,7 +3,7 @@
 load("@bazel_features//:features.bzl", "bazel_features")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
-load("//3rdparty/crates:crates.bzl", "crate_repositories")
+load("//extensions/bindgen/3rdparty/crates:crates.bzl", "crate_repositories")
 
 BINDGEN_VERSION = "0.71.1"
 

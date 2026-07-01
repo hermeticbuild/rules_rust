@@ -214,7 +214,7 @@ def _rust_bindgen_impl(ctx):
     if header not in cc_header_list:
         fail("Header {} is not in {}'s transitive headers.".format(ctx.attr.header, cc_lib), "header")
 
-    toolchain = ctx.toolchains[Label("//:toolchain_type")]
+    toolchain = ctx.toolchains[Label("//extensions/bindgen:toolchain_type")]
     bindgen_bin = toolchain.bindgen
     clang_bin = toolchain.clang
     libclang = getattr(toolchain, "libclang", None)
@@ -477,7 +477,7 @@ rust_bindgen = rule(
     outputs = {"out": "%{name}.rs"},
     fragments = ["cpp"],
     toolchains = [
-        config_common.toolchain_type("//:toolchain_type"),
+        config_common.toolchain_type("//extensions/bindgen:toolchain_type"),
         config_common.toolchain_type("@rules_rust//rust:toolchain_type"),
         config_common.toolchain_type("@rules_rust//rust/rustfmt:toolchain_type", mandatory = False),
         config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type"),
