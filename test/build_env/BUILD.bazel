@@ -12,7 +12,7 @@ rust_test(
     srcs = ["tests/custom_crate_name.rs"],
     crate_name = "custom_crate_name",
     edition = "2018",
-    version = "1.2.3",
+    version = "1.2.3-alpha.1+build.5",
 )
 
 rust_library(

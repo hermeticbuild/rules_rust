@@ -119,13 +119,30 @@ def _get_rustc_env(attr, toolchain, crate_name):
     Returns:
         dict: Rustc environment variables
     """
+    version = getattr(attr, "version", "0.0.0")
+    version_without_build_metadata = version.split("+", 1)[0]
+    major, minor, patch = version_without_build_metadata.split(".", 2)
+    if "-" in patch:
+        patch, pre = patch.split("-", 1)
+    else:
+        pre = ""
+
     result = {
         "CARGO_CFG_TARGET_ARCH": "" if toolchain.target_arch == None else toolchain.target_arch,
         "CARGO_CFG_TARGET_OS": "" if toolchain.target_os == None else toolchain.target_os,
         "CARGO_CRATE_NAME": crate_name,
-        # CARGO_PKG_NAME and CARGO_PKG_VERSION are commonly needed by clap derive macros.
+        # Cargo always defines these package variables, even when the manifest
+        # omits the corresponding optional fields. Clap derive macros consume
+        # AUTHORS and DESCRIPTION for `author` and `about` attributes.
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "",
+        "CARGO_PKG_HOMEPAGE": "",
         "CARGO_PKG_NAME": attr.name,
-        "CARGO_PKG_VERSION": getattr(attr, "version", "0.0.0"),
+        "CARGO_PKG_VERSION": version,
+        "CARGO_PKG_VERSION_MAJOR": major,
+        "CARGO_PKG_VERSION_MINOR": minor,
+        "CARGO_PKG_VERSION_PATCH": patch,
+        "CARGO_PKG_VERSION_PRE": pre,
     }
     return result
 
