@@ -2011,10 +2011,9 @@ def rustc_compile(
             require_explicit_unstable_features = rust_toolchain.require_explicit_unstable_features
 
     use_split_debuginfo = False
-    if (
-        feature_configuration and
-        cc_common.is_enabled(feature_configuration = feature_configuration, feature_name = "per_object_debug_info") and
-        ctx.fragments.cpp.fission_active_for_current_compilation_mode()
+    if feature_configuration and cc_helper.should_create_per_object_debug_info(
+        feature_configuration,
+        ctx.fragments.cpp,
     ):
         if rust_toolchain._skip_fission_for_rust:
             use_split_debuginfo = False
