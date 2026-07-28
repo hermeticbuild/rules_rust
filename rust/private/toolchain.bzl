@@ -650,6 +650,7 @@ def _rust_toolchain_impl(ctx):
         rust_std_paths = depset([file.dirname for file in sysroot.rust_std.to_list()]),
         rustc = sysroot.rustc,
         rustc_lib = sysroot.rustc_lib,
+        rustc_srcs = depset(ctx.files.rustc_srcs),
         rustfmt = sysroot.rustfmt,
         staticlib_ext = ctx.attr.staticlib_ext,
         stdlib_linkflags = stdlib_linkflags_cc_info,
@@ -879,6 +880,10 @@ rust_toolchain = rule(
         "rustc_lib": attr.label(
             doc = "The libraries used by rustc during compilation.",
             cfg = "exec",
+        ),
+        "rustc_srcs": attr.label(
+            doc = "The Rust compiler sources. These are exposed through the toolchain provider but are not included in `all_files`.",
+            allow_files = True,
         ),
         "rustfmt": attr.label(
             doc = "**Deprecated**: Instead see [rustfmt_toolchain](#rustfmt_toolchain)",

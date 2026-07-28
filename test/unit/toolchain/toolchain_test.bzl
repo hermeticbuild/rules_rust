@@ -87,10 +87,38 @@ def _std_libs_support_srcs_outside_package_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _toolchain_exposes_rustc_srcs_impl(ctx):
+    env = analysistest.begin(ctx)
+    toolchain_info = analysistest.target_under_test(env)[platform_common.ToolchainInfo]
+    rustc_srcs = toolchain_info.rustc_srcs.to_list()
+
+    asserts.equals(env, ["rustc_source.rs"], [file.basename for file in rustc_srcs])
+
+    all_files = toolchain_info.all_files.to_list()
+    for rustc_src in rustc_srcs:
+        asserts.false(env, rustc_src in all_files)
+
+    for action in analysistest.target_actions(env):
+        action_inputs = action.inputs.to_list()
+        for rustc_src in rustc_srcs:
+            asserts.false(env, rustc_src in action_inputs)
+
+    return analysistest.end(env)
+
+def _toolchain_defaults_to_empty_rustc_srcs_impl(ctx):
+    env = analysistest.begin(ctx)
+    toolchain_info = analysistest.target_under_test(env)[platform_common.ToolchainInfo]
+
+    asserts.equals(env, [], toolchain_info.rustc_srcs.to_list())
+
+    return analysistest.end(env)
+
 toolchain_specifies_target_triple_test = analysistest.make(_toolchain_specifies_target_triple_test_impl)
 toolchain_specifies_target_json_test = analysistest.make(_toolchain_specifies_target_json_test_impl)
 toolchain_location_expands_linkflags_test = analysistest.make(_toolchain_location_expands_linkflags_impl)
 toolchain_location_expands_extra_rustc_flags_test = analysistest.make(_toolchain_location_expands_extra_rustc_flags_impl)
+toolchain_exposes_rustc_srcs_test = analysistest.make(_toolchain_exposes_rustc_srcs_impl)
+toolchain_defaults_to_empty_rustc_srcs_test = analysistest.make(_toolchain_defaults_to_empty_rustc_srcs_impl)
 std_libs_support_srcs_outside_package_test = analysistest.make(_std_libs_support_srcs_outside_package_test_impl)
 
 def _define_test_targets():
@@ -134,6 +162,12 @@ def _define_test_targets():
         is_executable = True,
     )
 
+    write_file(
+        name = "rustc_srcs",
+        out = "rustc_source.rs",
+        content = [],
+    )
+
     rust_toolchain(
         name = "rust_triple_toolchain",
         binary_ext = "",
@@ -142,6 +176,7 @@ def _define_test_targets():
         rust_doc = ":mock_rustdoc",
         rust_std = ":std_libs",
         rustc = ":mock_rustc",
+        rustc_srcs = ":rustc_srcs",
         process_wrapper = "@rules_rust//util/process_wrapper",
         linker = ":mock_rust_lld",
         staticlib_ext = ".a",
@@ -233,6 +268,14 @@ def toolchain_test_suite(name):
         name = "toolchain_location_expands_extra_rustc_flags_test",
         target_under_test = ":rust_location_expand_toolchain",
     )
+    toolchain_exposes_rustc_srcs_test(
+        name = "toolchain_exposes_rustc_srcs_test",
+        target_under_test = ":rust_triple_toolchain",
+    )
+    toolchain_defaults_to_empty_rustc_srcs_test(
+        name = "toolchain_defaults_to_empty_rustc_srcs_test",
+        target_under_test = ":rust_json_toolchain",
+    )
     std_libs_support_srcs_outside_package_test(
         name = "std_libs_support_srcs_outside_package_test",
         target_under_test = ":std_libs_with_srcs_outside_package",
@@ -246,6 +289,8 @@ def toolchain_test_suite(name):
             ":toolchain_specifies_inline_target_json_test",
             ":toolchain_location_expands_linkflags_test",
             ":toolchain_location_expands_extra_rustc_flags_test",
+            ":toolchain_exposes_rustc_srcs_test",
+            ":toolchain_defaults_to_empty_rustc_srcs_test",
             ":std_libs_support_srcs_outside_package_test",
         ],
     )
