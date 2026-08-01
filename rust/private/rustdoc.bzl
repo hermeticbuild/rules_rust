@@ -160,7 +160,8 @@ def rustdoc_compile_action(
         build_flags_files = build_flags_files,
         emit = [],
         remap_path_prefix = None,
-        add_flags_for_binary = True,
+        # Documentation does not link; doctest compilation does.
+        add_flags_for_binary = is_test,
         include_link_flags = is_test,
         force_depend_on_objects = is_test,
         skip_expanding_rustc_env = True,
