@@ -16,37 +16,14 @@ pub fn test_tool_rootpath() {
 
 #[test]
 pub fn test_execpath() {
-    // Replace `\` to ensure paths are consistent on Windows.`
-    let data_execpath = env!("DATA_EXECPATH").replace('\\', "/");
-    let tool_execpath = env!("TOOL_EXECPATH").replace('\\', "/");
-
-    let data_path = data_execpath
-        .split_at(
-            data_execpath
-                .find("/bazel-out/")
-                .unwrap_or_else(|| panic!("Failed to parse execroot from: {}", data_execpath)),
-        )
-        .1;
-    let tool_path = tool_execpath
-        .split_at(
-            tool_execpath
-                .find("/bazel-out/")
-                .unwrap_or_else(|| panic!("Failed to parse execroot from: {}", tool_execpath)),
-        )
-        .1;
-
-    let (data_cfg, data_short_path) = data_path.split_at(
-        data_path
-            .find("/bin/")
-            .unwrap_or_else(|| panic!("Failed to find bin in {}", data_path))
-            + "/bin/".len(),
-    );
-    let (tool_cfg, tool_short_path) = tool_path.split_at(
-        tool_path
-            .find("/bin/")
-            .unwrap_or_else(|| panic!("Failed to find bin in {}", tool_path))
-            + "/bin/".len(),
-    );
+    let data_execpath = env!("DATA_EXECPATH");
+    let tool_execpath = env!("TOOL_EXECPATH");
+    let (data_cfg, data_short_path) = data_execpath
+        .split_once("/bin/")
+        .unwrap_or_else(|| panic!("Failed to find bin in {}", data_execpath));
+    let (tool_cfg, tool_short_path) = tool_execpath
+        .split_once("/bin/")
+        .unwrap_or_else(|| panic!("Failed to find bin in {}", tool_execpath));
 
     assert_ne!(
         data_cfg, tool_cfg,

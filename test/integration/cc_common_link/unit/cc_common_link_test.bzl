@@ -73,10 +73,6 @@ with_exec_cfg = rule(
     },
 )
 
-def _outputs_object_file(action):
-    object_files = [output for output in action.outputs.to_list() if output.extension in ("o", "obj")]
-    return len(object_files) > 0
-
 def _use_cc_common_link_test(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
@@ -85,7 +81,25 @@ def _use_cc_common_link_test(ctx):
     # When --experimental_use_cc_common_link is enabled the compile+link Rustc action produces a
     # .o/.obj file.
     rustc_action = [action for action in registered_actions if action.mnemonic == "Rustc"][0]
-    asserts.true(env, _outputs_object_file(rustc_action), "Rustc action did not output an object file")
+    object_files = [
+        output
+        for output in rustc_action.outputs.to_list()
+        if output.extension in ("o", "obj")
+    ]
+    asserts.true(env, len(object_files) > 0, "Rustc action did not output an object file")
+    object_file = object_files[0]
+    expected_working_dir_check_arguments = ["--check-output-for-working-dir", object_file.path]
+    asserts.true(
+        env,
+        any([
+            rustc_action.argv[index:index + 2] == expected_working_dir_check_arguments
+            for index in range(len(rustc_action.argv) - 1)
+        ]),
+        "Expected adjacent working-directory check arguments {} in {}".format(
+            expected_working_dir_check_arguments,
+            rustc_action.argv,
+        ),
+    )
 
     has_cpp_link_action = len([action for action in registered_actions if action.mnemonic == "CppLink"]) > 0
     asserts.true(env, has_cpp_link_action, "Expected that the target registers a CppLink action")

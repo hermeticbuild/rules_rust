@@ -10,7 +10,12 @@ load(
     "rust_shared_library",
     "rust_static_library",
 )
-load("//test/unit:common.bzl", "assert_action_mnemonic")
+load(
+    "//test/unit:common.bzl",
+    "assert_action_mnemonic",
+    "assert_list_contains_adjacent_elements",
+    "assert_list_contains_adjacent_elements_not",
+)
 
 def _native_action_inputs_present_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -28,6 +33,27 @@ def _native_action_inputs_present_test_impl(ctx):
             inputs = inputs,
         ),
     )
+
+    if "--crate-type=staticlib" in action.argv:
+        archive = tut[DefaultInfo].files.to_list()[0]
+        checked_output = archive
+        if archive.extension == "lib":
+            object_files = [
+                output
+                for output in action.outputs.to_list()
+                if output.extension in ("o", "obj")
+            ]
+            asserts.equals(env, 1, len(object_files))
+            checked_output = object_files[0]
+            assert_list_contains_adjacent_elements_not(env, action.argv, [
+                "--check-output-for-working-dir",
+                archive.path,
+            ])
+
+        assert_list_contains_adjacent_elements(env, action.argv, [
+            "--check-output-for-working-dir",
+            checked_output.path,
+        ])
 
     return analysistest.end(env)
 

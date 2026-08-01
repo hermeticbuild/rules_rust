@@ -10,6 +10,11 @@ cargo_build_script(
 rust_test(
     name = "test",
     srcs = ["test.rs"],
+    data = [":build_script"],
     edition = "2021",
-    deps = [":build_script"],
+    env = {"BUILD_SCRIPT_OUT_DIR": "$(rlocationpath :build_script)"},
+    deps = [
+        ":build_script",
+        "//rust/runfiles",
+    ],
 )

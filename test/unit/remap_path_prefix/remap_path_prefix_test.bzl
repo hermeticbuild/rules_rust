@@ -45,6 +45,40 @@ def _subst_flags_test_impl(ctx):
 
 _subst_flags_test = analysistest.make(_subst_flags_test_impl)
 
+def _assert_working_dir_output_check(env, target):
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
+    artifact = target[DefaultInfo].files.to_list()[0]
+    assert_list_contains_adjacent_elements(env, action.argv, [
+        "--check-output-for-working-dir",
+        artifact.path,
+    ])
+
+def _working_dir_output_check_test_impl(ctx):
+    """Verify Rustc checks its output for the action working directory."""
+    env = analysistest.begin(ctx)
+    _assert_working_dir_output_check(env, analysistest.target_under_test(env))
+    return analysistest.end(env)
+
+_working_dir_output_check_test = analysistest.make(_working_dir_output_check_test_impl)
+
+def _pipelined_working_dir_output_check_test_impl(ctx):
+    """Verify RustcMetadata does not check for the action working directory."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+
+    metadata_action = [action for action in target.actions if action.mnemonic == "RustcMetadata"][0]
+    _assert_working_dir_output_check(env, target)
+    assert_argv_contains_not(env, metadata_action, "--check-output-for-working-dir")
+
+    return analysistest.end(env)
+
+_pipelined_working_dir_output_check_test = analysistest.make(
+    _pipelined_working_dir_output_check_test_impl,
+    config_settings = {
+        str(Label("//rust/settings:pipelined_compilation")): True,
+    },
+)
+
 def _coverage_remap_path_prefix_test_impl(ctx):
     """Verify a single `--remap-path-prefix` flag covers the bin directory.
 
@@ -187,6 +221,25 @@ def remap_path_prefix_test_suite(name):
         target_under_test = ":remap_bin",
     )
 
+    _working_dir_output_check_test(
+        name = "working_dir_output_check_lib_test",
+        target_under_test = ":remap_lib",
+    )
+
+    _working_dir_output_check_test(
+        name = "working_dir_output_check_bin_test",
+        target_under_test = ":remap_bin",
+    )
+
+    _pipelined_working_dir_output_check_test(
+        name = "pipelined_working_dir_output_check_lib_test",
+        target_under_test = ":remap_lib",
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
+    )
+
     _coverage_remap_path_prefix_test(
         name = "coverage_remap_path_prefix_mixed_lib_test",
         target_under_test = ":remap_mixed_lib",
@@ -202,6 +255,9 @@ def remap_path_prefix_test_suite(name):
         ":remap_path_prefix_bin_test",
         ":subst_flags_lib_test",
         ":subst_flags_bin_test",
+        ":working_dir_output_check_lib_test",
+        ":working_dir_output_check_bin_test",
+        ":pipelined_working_dir_output_check_lib_test",
         ":coverage_remap_path_prefix_mixed_lib_test",
         ":no_coverage_remap_path_prefix_lib_test",
     ]
