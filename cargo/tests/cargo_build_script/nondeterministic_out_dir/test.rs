@@ -2,11 +2,23 @@
 //! If the runner failed to strip config.log / *.d / *.pc files, the TreeArtifact hash
 //! would change on every run, causing unnecessary rebuilds for all downstream crates.
 
+use std::path::PathBuf;
+
 const OUTPUT: &str = include_str!(concat!(env!("OUT_DIR"), "/output.txt"));
+
+fn build_script_out_dir() -> PathBuf {
+    let runfiles = runfiles::Runfiles::create().expect("unable to resolve test runfiles");
+    let out_dir = std::env::var("BUILD_SCRIPT_OUT_DIR").expect("BUILD_SCRIPT_OUT_DIR is not set");
+    runfiles::rlocation!(runfiles, &out_dir).expect("unable to resolve build script OUT_DIR")
+}
 
 #[test]
 fn legitimate_output_survives_nondeterministic_file_removal() {
     assert_eq!(OUTPUT, "legitimate output");
+    assert_eq!(
+        std::fs::read_to_string(build_script_out_dir().join("output.txt")).unwrap(),
+        OUTPUT,
+    );
 }
 
 // Verify that volatile files written by the build script are absent from the
@@ -17,7 +29,7 @@ fn legitimate_output_survives_nondeterministic_file_removal() {
 #[test]
 fn config_log_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/config.log")).exists(),
+        !build_script_out_dir().join("config.log").exists(),
         "config.log should have been removed from OUT_DIR"
     );
 }
@@ -25,7 +37,7 @@ fn config_log_removed() {
 #[test]
 fn config_status_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/config.status")).exists(),
+        !build_script_out_dir().join("config.status").exists(),
         "config.status should have been removed from OUT_DIR"
     );
 }
@@ -33,7 +45,7 @@ fn config_status_removed() {
 #[test]
 fn makefile_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/Makefile")).exists(),
+        !build_script_out_dir().join("Makefile").exists(),
         "Makefile should have been removed from OUT_DIR"
     );
 }
@@ -41,7 +53,7 @@ fn makefile_removed() {
 #[test]
 fn makefile_config_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/Makefile.config")).exists(),
+        !build_script_out_dir().join("Makefile.config").exists(),
         "Makefile.config should have been removed from OUT_DIR"
     );
 }
@@ -49,7 +61,7 @@ fn makefile_config_removed() {
 #[test]
 fn config_cache_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/config.cache")).exists(),
+        !build_script_out_dir().join("config.cache").exists(),
         "config.cache should have been removed from OUT_DIR"
     );
 }
@@ -57,11 +69,11 @@ fn config_cache_removed() {
 #[test]
 fn dot_d_files_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/foo.d")).exists(),
+        !build_script_out_dir().join("foo.d").exists(),
         "foo.d should have been removed from OUT_DIR"
     );
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/baz.d")).exists(),
+        !build_script_out_dir().join("baz.d").exists(),
         "baz.d should have been removed from OUT_DIR"
     );
 }
@@ -69,7 +81,7 @@ fn dot_d_files_removed() {
 #[test]
 fn dot_pc_file_removed() {
     assert!(
-        !std::path::Path::new(concat!(env!("OUT_DIR"), "/foo.pc")).exists(),
+        !build_script_out_dir().join("foo.pc").exists(),
         "foo.pc should have been removed from OUT_DIR"
     );
 }
