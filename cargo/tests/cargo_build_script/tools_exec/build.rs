@@ -36,11 +36,12 @@ fn main() {
     test_encoded_rustflags();
     test_toolchain_var();
 
-    // Pass the TOOL_PATH along to the rust_test so we can assert on it.
-    println!(
-        "cargo:rustc-env=TOOL_PATH={}",
-        std::env::var("TOOL").unwrap()
-    );
+    // Pass the execution-root-relative tool path to the rust_test.
+    let tool_path = std::env::var("TOOL").unwrap().replace('\\', "/");
+    let (_, relative_tool_path) = tool_path
+        .split_once("/bazel-out/")
+        .expect("tool path does not contain bazel-out");
+    println!("cargo:rustc-env=TOOL_PATH=bazel-out/{}", relative_tool_path);
 
     // Assert that the cc and rust toolchain env vars existed and were executable.
     // We don't assert what happens when they're executed (in particular, we don't check for a

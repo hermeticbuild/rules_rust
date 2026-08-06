@@ -30,8 +30,12 @@ pub(crate) struct Options {
     pub(crate) executable: String,
     // Contains arguments for the child process fetched from files.
     pub(crate) child_arguments: Vec<String>,
+    // Absolute working directory used for `${pwd}` substitutions.
+    pub(crate) working_dir: String,
     // Contains environment variables for the child process fetched from files.
     pub(crate) child_environment: HashMap<String, String>,
+    // Compiler outputs checked for an embedded absolute working directory.
+    pub(crate) check_output_for_working_dir: Vec<String>,
     // If set, create the specified file after the child process successfully
     // terminated its execution.
     pub(crate) touch_file: Option<String>,
@@ -60,6 +64,7 @@ pub(crate) fn options() -> Result<Options, OptionError> {
     let mut env_file_raw = None;
     let mut out_dir_raw = None;
     let mut arg_file_raw = None;
+    let mut check_output_for_working_dir_raw = None;
     let mut touch_file = None;
     let mut copy_output_raw = None;
     let mut stdout_file = None;
@@ -91,6 +96,11 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         "--arg-file",
         "File(s) containing command line arguments to pass to the child process.",
         &mut arg_file_raw,
+    );
+    flags.define_repeated_flag(
+        "--check-output-for-working-dir",
+        "Compiler output(s) checked for an embedded absolute working directory.",
+        &mut check_output_for_working_dir_raw,
     );
     flags.define_flag(
         "--touch-file",
@@ -289,7 +299,9 @@ pub(crate) fn options() -> Result<Options, OptionError> {
     Ok(Options {
         executable: exec_path.to_owned(),
         child_arguments: args.to_vec(),
+        working_dir: current_dir,
         child_environment: vars,
+        check_output_for_working_dir: check_output_for_working_dir_raw.unwrap_or_default(),
         touch_file,
         copy_output,
         stdout_file,

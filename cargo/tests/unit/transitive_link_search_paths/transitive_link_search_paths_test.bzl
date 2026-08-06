@@ -3,7 +3,13 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//cargo:defs.bzl", "cargo_build_script")
 load("//rust:defs.bzl", "rust_binary", "rust_common", "rust_library", "rust_proc_macro")
-load("//test/unit:common.bzl", "assert_action_mnemonic", "assert_list_contains")
+load(
+    "//test/unit:common.bzl",
+    "assert_action_mnemonic",
+    "assert_list_contains",
+    "assert_list_contains_adjacent_elements",
+    "assert_list_contains_adjacent_elements_not",
+)
 
 def _transitive_link_search_paths_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -14,6 +20,28 @@ def _transitive_link_search_paths_test_impl(ctx):
     # Checks that this contains the dep build script, but not the build script
     # of the dep of the proc_macro.
     asserts.equals(env, link_search_path_basenames, ["dep_build_script.linksearchpaths"])
+
+    action = tut.actions[0]
+    assert_action_mnemonic(env, action, "Rustc")
+    archive = tut[DefaultInfo].files.to_list()[0]
+    checked_output = archive
+    if any([arg.endswith("-windows-msvc") for arg in action.argv]):
+        object_files = [
+            output
+            for output in action.outputs.to_list()
+            if output.extension in ("o", "obj")
+        ]
+        asserts.equals(env, 1, len(object_files))
+        checked_output = object_files[0]
+        assert_list_contains_adjacent_elements_not(env, action.argv, [
+            "--check-output-for-working-dir",
+            archive.path,
+        ])
+
+    assert_list_contains_adjacent_elements(env, action.argv, [
+        "--check-output-for-working-dir",
+        checked_output.path,
+    ])
 
     return analysistest.end(env)
 
