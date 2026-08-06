@@ -37,6 +37,8 @@ use crate::rustc::ErrorFormat;
 #[cfg(windows)]
 use crate::util::read_file_to_array;
 
+const ARTIFACT_SCAN_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
 #[derive(Debug)]
 struct ProcessWrapperError(String);
 
@@ -198,6 +200,13 @@ fn consolidate_dependency_search_paths(
                     e
                 ))
             })?;
+            let file_name = entry.file_name();
+            let file_name_lower = file_name.to_string_lossy().to_ascii_lowercase();
+            // Concurrent rustc actions remove temporary .rcgu.o files.
+            if file_name_lower.ends_with(".rcgu.o") {
+                continue;
+            }
+
             let file_type = entry.file_type().map_err(|e| {
                 ProcessWrapperError(format!(
                     "unable to inspect dependency search path {}: {}",
@@ -209,10 +218,6 @@ fn consolidate_dependency_search_paths(
                 continue;
             }
 
-            let file_name = entry.file_name();
-            let file_name_lower = file_name
-                .to_string_lossy()
-                .to_ascii_lowercase();
             if !seen.insert(file_name_lower) {
                 continue;
             }
@@ -290,6 +295,71 @@ fn process_line(
         }
     }
     rustc::process_json(line, format)
+}
+
+/// Search a byte stream in linear time with Knuth–Morris–Pratt:
+/// https://en.wikipedia.org/wiki/Knuth%E2%80%93Morris%E2%80%93Pratt_algorithm
+fn contains_byte_sequence(reader: &mut impl io::Read, needle: &[u8]) -> io::Result<bool> {
+    if needle.is_empty() {
+        return Ok(true);
+    }
+
+    // fallback_lengths[index] is the longest proper prefix of needle[..=index]
+    // that is also a suffix, so mismatches do not rescan previously read bytes.
+    let mut fallback_lengths = vec![0; needle.len()];
+    let mut fallback_length = 0;
+    for (index, &byte) in needle.iter().enumerate().skip(1) {
+        while fallback_length > 0 && byte != needle[fallback_length] {
+            fallback_length = fallback_lengths[fallback_length - 1];
+        }
+        if byte == needle[fallback_length] {
+            fallback_length += 1;
+        }
+        fallback_lengths[index] = fallback_length;
+    }
+
+    let mut buffer = vec![0; ARTIFACT_SCAN_BUFFER_SIZE];
+    // Keep matched between reads so matches can cross buffer boundaries.
+    let mut matched = 0;
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            return Ok(false);
+        }
+
+        for &byte in &buffer[..bytes_read] {
+            while matched > 0 && byte != needle[matched] {
+                matched = fallback_lengths[matched - 1];
+            }
+            if byte == needle[matched] {
+                matched += 1;
+                if matched == needle.len() {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+}
+
+fn check_output_for_working_dir(
+    output_path: &str,
+    working_dir: &str,
+) -> Result<(), ProcessWrapperError> {
+    let mut output = fs::File::open(output_path)
+        .map_err(|error| ProcessWrapperError(format!("failed to open {output_path}: {error}")))?;
+    let contains_working_dir = contains_byte_sequence(&mut output, working_dir.as_bytes())
+        .map_err(|error| ProcessWrapperError(format!("failed to scan {output_path}: {error}")))?;
+
+    if contains_working_dir {
+        return Err(ProcessWrapperError(format!(
+            "compiled Rust output {output_path} embeds the absolute working directory {working_dir}. \
+             Do not retain env!(\"CARGO_MANIFEST_DIR\") or env!(\"OUT_DIR\") in compiled code; \
+             include_str!() and include_bytes!() may use those values only for compile-time file \
+             access"
+        )));
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<(), ProcessWrapperError> {
@@ -383,6 +453,9 @@ fn main() -> Result<(), ProcessWrapperError> {
     }
 
     if code == 0 {
+        for output_path in &opts.check_output_for_working_dir {
+            check_output_for_working_dir(output_path, &opts.working_dir)?;
+        }
         if let Some(tf) = opts.touch_file {
             OpenOptions::new()
                 .create(true)
@@ -415,6 +488,28 @@ fn main() -> Result<(), ProcessWrapperError> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_contains_byte_sequence_with_overlapping_prefix() {
+        let mut contents = io::Cursor::new(b"aaaaaab".as_slice());
+        assert!(contains_byte_sequence(&mut contents, b"aaaab").unwrap());
+    }
+
+    #[test]
+    fn test_contains_byte_sequence_across_buffer_boundary() {
+        let working_dir = b"/sandbox/execroot/_main";
+        let mut contents = vec![0xff; ARTIFACT_SCAN_BUFFER_SIZE - 3];
+        contents.extend_from_slice(working_dir);
+        contents.extend_from_slice(&[0x00, 0xfe]);
+        let mut contents = io::Cursor::new(contents);
+        assert!(contains_byte_sequence(&mut contents, working_dir).unwrap());
+    }
+
+    #[test]
+    fn test_contains_byte_sequence_without_match() {
+        let mut contents = io::Cursor::new(b"/sandbox/manifests".as_slice());
+        assert!(!contains_byte_sequence(&mut contents, b"/sandbox/manifest/").unwrap());
+    }
 
     fn parse_json(json_str: &str) -> Result<JsonValue, String> {
         json_str.parse::<JsonValue>().map_err(|e| e.to_string())

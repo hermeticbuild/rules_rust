@@ -1892,11 +1892,24 @@ def rustc_compile(
         distributed_thin_lto and crate_info.type == "bin"
     )
 
-    # output_o is consumed by cc_common.link or exported for distributed
-    # ThinLTO. crate_info.output.basename keeps output_o distinct for targets
-    # that share crate_info.name, including rust_test targets for the same crate.
+    scan_msvc_archive_object = (
+        rust_toolchain.target_abi == "msvc" and
+        (
+            crate_info.type == "staticlib" or
+            (
+                crate_info.type in ("lib", "rlib") and
+                build_info != None and
+                build_info.out_dir != None
+            )
+        )
+    )
+
+    # output_o is consumed by cc_common.link, exported for distributed ThinLTO,
+    # or scanned instead of an MSVC archive containing native-object paths.
+    # crate_info.output.basename keeps output_o distinct for targets that share
+    # crate_info.name, including rust_test targets for the same crate.
     output_o = None
-    if use_cc_common_link or distributed_thin_lto:
+    if use_cc_common_link or distributed_thin_lto or scan_msvc_archive_object:
         output_o = ctx.actions.declare_file(crate_info.output.basename + ".o", sibling = crate_info.output)
 
     runtime_libs = get_cc_toolchain_runtime_libs(cc_toolchain, feature_configuration, crate_info.type, resolve_cc_runtime_linkage(ctx))
@@ -2143,6 +2156,17 @@ def rustc_compile(
         fail("No process wrapper was defined for {}".format(ctx.label))
 
     if not rust_toolchain._bootstrapping:
+        # Search code-generating rustc outputs for the resolved action working
+        # directory. RustcMetadata has separate arguments and no object code.
+        checked_outputs = [output_o] if scan_msvc_archive_object else [outputs[0]]
+        if output_o and output_o != checked_outputs[0]:
+            checked_outputs.append(output_o)
+        args.process_wrapper_flags.add_all(
+            checked_outputs,
+            before_each = "--check-output-for-working-dir",
+            expand_directories = False,
+        )
+
         # Run as normal
         ctx.actions.run(
             executable = process_wrapper,
