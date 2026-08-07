@@ -390,6 +390,8 @@ def _may_enable_default_linker_libraries(flag_groups):
             elif flag.startswith("--codegen="):
                 option = flag.removeprefix("--codegen=")
 
+            if option == "default-linker-libraries":
+                return True
             if option != None and option.startswith("default-linker-libraries="):
                 value = option.split("=", 1)[1]
                 if value in ["y", "yes", "on", "true"]:
