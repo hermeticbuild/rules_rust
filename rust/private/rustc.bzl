@@ -425,6 +425,10 @@ def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_config
             action_name = action_name,
             variables = link_variables,
         ))
+
+        # rustc passes -nodefaultlibs to compiler-driver linkers and supplies
+        # the unwind runtime explicitly, so Clang cannot use this toolchain arg.
+        link_args = [arg for arg in link_args if arg != "--unwindlib=none"]
         link_env = cc_common.get_environment_variables(
             feature_configuration = feature_configuration,
             action_name = action_name,

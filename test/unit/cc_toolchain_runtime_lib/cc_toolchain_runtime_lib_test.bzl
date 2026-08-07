@@ -3,11 +3,12 @@ Tests for handling of cc_toolchain's static_runtime_lib/dynamic_runtime_lib.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "feature")
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "feature", "flag_group", "flag_set")
 load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
-load("//rust:defs.bzl", "rust_shared_library", "rust_static_library")
+load("//rust:defs.bzl", "rust_binary", "rust_shared_library", "rust_static_library")
 
 def _test_cc_config_impl(ctx):
     config_info = cc_common.create_cc_toolchain_config_info(
@@ -22,6 +23,21 @@ def _test_cc_config_impl(ctx):
         abi_libc_version = "unknown",
         features = [
             feature(name = "static_link_cpp_runtimes", enabled = True),
+            feature(
+                name = "test_linker_driver_args",
+                enabled = True,
+                flag_sets = [
+                    flag_set(
+                        actions = [ACTION_NAMES.cpp_link_executable],
+                        flag_groups = [
+                            flag_group(flags = [
+                                "--unwindlib=none",
+                                "-Wl,--retained-link-arg",
+                            ]),
+                        ],
+                    ),
+                ],
+            ),
         ],
     )
     return config_info
@@ -201,4 +217,25 @@ def runtime_libs_test(name):
         name = "%s/static_library" % name,
         target_under_test = "%s/_static_library" % name,
         expected_inputs = ["dummy.a"],
+    )
+
+    rust_binary(
+        name = "%s/__binary" % name,
+        edition = "2018",
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary" % name,
+        target_under_test = "%s/_binary" % name,
+        expected_args = ["--codegen=link-arg=-Wl,--retained-link-arg"],
+        unexpected_args = ["--codegen=link-arg=--unwindlib=none"],
     )
