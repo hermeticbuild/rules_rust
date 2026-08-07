@@ -369,14 +369,24 @@ def get_cc_user_link_flags(ctx):
 
 def _may_enable_default_linker_libraries(flag_groups):
     """Returns whether rustc flags may enable the linker's default libraries."""
+    default_linker_libraries = False
     for flags in flag_groups:
         if type(flags) == "Args":
-            # Args are opaque at analysis time, so preserve toolchain semantics.
-            return True
+            # Args are opaque at analysis time. A later static flag can still
+            # restore a known value because rustc uses the last setting.
+            default_linker_libraries = None
+            continue
 
         expect_codegen_option = False
         for flag in flags:
             if type(flag) != "string":
+                continue
+
+            if flag.startswith("@"):
+                # rustc expands response files in place, but their contents are
+                # opaque at analysis time.
+                default_linker_libraries = None
+                expect_codegen_option = False
                 continue
 
             option = None
@@ -391,13 +401,17 @@ def _may_enable_default_linker_libraries(flag_groups):
                 option = flag.removeprefix("--codegen=")
 
             if option == "default-linker-libraries":
-                return True
+                default_linker_libraries = True
             if option != None and option.startswith("default-linker-libraries="):
                 value = option.split("=", 1)[1]
                 if value in ["y", "yes", "on", "true"]:
-                    return True
+                    default_linker_libraries = True
+                elif value in ["n", "no", "off", "false"]:
+                    default_linker_libraries = False
+                else:
+                    default_linker_libraries = None
 
-    return False
+    return default_linker_libraries != False
 
 def get_linker_and_args(
         ctx,
@@ -470,7 +484,7 @@ def get_linker_and_args(
         if not preserve_unwindlib_none:
             # rustc passes -nodefaultlibs to compiler-driver linkers and supplies
             # the unwind runtime explicitly, so Clang cannot use this toolchain arg.
-            link_args = [arg for arg in link_args if arg != "--unwindlib=none"]
+            link_args = [arg for arg in link_args if arg not in ["-unwindlib=none", "--unwindlib=none"]]
         link_env = cc_common.get_environment_variables(
             feature_configuration = feature_configuration,
             action_name = action_name,
@@ -1258,11 +1272,14 @@ def construct_arguments(
 
     collected_extra_rustc_flags = collect_extra_rustc_flags(ctx, toolchain, crate_info.root, crate_info.type)
     authored_rustc_flags = getattr(attr, "rustc_flags", [])
-    preserve_unwindlib_none = _may_enable_default_linker_libraries([
-        collected_extra_rustc_flags,
-        rust_flags,
-        authored_rustc_flags,
-    ])
+    rustc_flag_groups = [collected_extra_rustc_flags]
+    if type(rust_flags) != "Args":
+        rustc_flag_groups.append(rust_flags)
+    rustc_flag_groups.append(authored_rustc_flags)
+    if type(rust_flags) == "Args":
+        # Opaque Args are appended after the main rustc Args object.
+        rustc_flag_groups.append(rust_flags)
+    preserve_unwindlib_none = _may_enable_default_linker_libraries(rustc_flag_groups)
 
     # Rustc arguments
     rustc_flags = ctx.actions.args()
