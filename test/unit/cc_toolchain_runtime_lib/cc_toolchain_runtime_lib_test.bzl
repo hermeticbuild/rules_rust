@@ -239,3 +239,27 @@ def runtime_libs_test(name):
         expected_args = ["--codegen=link-arg=-Wl,--retained-link-arg"],
         unexpected_args = ["--codegen=link-arg=--unwindlib=none"],
     )
+
+    rust_binary(
+        name = "%s/__binary_with_default_linker_libraries" % name,
+        edition = "2018",
+        rustc_flags = ["-Cdefault-linker-libraries=yes"],
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary_with_default_linker_libraries" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary_with_default_linker_libraries" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary_with_default_linker_libraries" % name,
+        target_under_test = "%s/_binary_with_default_linker_libraries" % name,
+        expected_args = [
+            "--codegen=link-arg=--unwindlib=none",
+            "--codegen=link-arg=-Wl,--retained-link-arg",
+        ],
+    )

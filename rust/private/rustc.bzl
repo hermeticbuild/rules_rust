@@ -367,7 +367,45 @@ def get_cc_user_link_flags(ctx):
     """
     return ctx.fragments.cpp.linkopts
 
-def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary = False):
+def _may_enable_default_linker_libraries(flag_groups):
+    """Returns whether rustc flags may enable the linker's default libraries."""
+    for flags in flag_groups:
+        if type(flags) == "Args":
+            # Args are opaque at analysis time, so preserve toolchain semantics.
+            return True
+
+        expect_codegen_option = False
+        for flag in flags:
+            if type(flag) != "string":
+                continue
+
+            option = None
+            if expect_codegen_option:
+                option = flag
+                expect_codegen_option = False
+            elif flag in ["-C", "--codegen"]:
+                expect_codegen_option = True
+            elif flag.startswith("-C"):
+                option = flag.removeprefix("-C")
+            elif flag.startswith("--codegen="):
+                option = flag.removeprefix("--codegen=")
+
+            if option != None and option.startswith("default-linker-libraries="):
+                value = option.split("=", 1)[1]
+                if value in ["y", "yes", "on", "true"]:
+                    return True
+
+    return False
+
+def get_linker_and_args(
+        ctx,
+        crate_type,
+        toolchain,
+        cc_toolchain,
+        feature_configuration,
+        rpaths,
+        add_flags_for_binary = False,
+        preserve_unwindlib_none = False):
     """Gathers cc_common linker information
 
     Args:
@@ -378,6 +416,7 @@ def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_config
         feature_configuration (FeatureConfiguration): Feature configuration to be queried.
         rpaths (depset): Depset of directories where loader will look for libraries at runtime.
         add_flags_for_binary (bool, optional): Whether to add "bin" link flags to the command regardless of `crate_type`.
+        preserve_unwindlib_none (bool, optional): Whether rustc may leave default linker libraries enabled.
 
 
     Returns:
@@ -426,9 +465,10 @@ def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_config
             variables = link_variables,
         ))
 
-        # rustc passes -nodefaultlibs to compiler-driver linkers and supplies
-        # the unwind runtime explicitly, so Clang cannot use this toolchain arg.
-        link_args = [arg for arg in link_args if arg != "--unwindlib=none"]
+        if not preserve_unwindlib_none:
+            # rustc passes -nodefaultlibs to compiler-driver linkers and supplies
+            # the unwind runtime explicitly, so Clang cannot use this toolchain arg.
+            link_args = [arg for arg in link_args if arg != "--unwindlib=none"]
         link_env = cc_common.get_environment_variables(
             feature_configuration = feature_configuration,
             action_name = action_name,
@@ -1214,6 +1254,14 @@ def construct_arguments(
     # greater than 1) is used.
     map_flag = _remove_codegen_units if _will_emit_object_file(emit) else None
 
+    collected_extra_rustc_flags = collect_extra_rustc_flags(ctx, toolchain, crate_info.root, crate_info.type)
+    authored_rustc_flags = getattr(attr, "rustc_flags", [])
+    preserve_unwindlib_none = _may_enable_default_linker_libraries([
+        collected_extra_rustc_flags,
+        rust_flags,
+        authored_rustc_flags,
+    ])
+
     # Rustc arguments
     rustc_flags = ctx.actions.args()
     rustc_flags.set_param_file_format("multiline")
@@ -1393,6 +1441,7 @@ def construct_arguments(
                 feature_configuration,
                 rpaths,
                 add_flags_for_binary = add_flags_for_binary,
+                preserve_unwindlib_none = preserve_unwindlib_none,
             )
 
             env.update(link_env)
@@ -1556,7 +1605,7 @@ def construct_arguments(
     # stripped features are silently dropped — matching the historical
     # behavior where `__all__` (or no config) means "no restriction".
     extra_rustc_flags = _extract_allowed_unstable_features_from_flags(
-        collect_extra_rustc_flags(ctx, toolchain, crate_info.root, crate_info.type),
+        collected_extra_rustc_flags,
         all_allowed_unstable_features,
     )
     if getattr(ctx.attr, "unstable_rust_features_config", None) and not "__all__" in all_allowed_unstable_features:
@@ -1607,7 +1656,6 @@ def construct_arguments(
                     rustc_flags.add(flag)
 
     # Add target specific flags last, so they can override previous flags
-    authored_rustc_flags = getattr(attr, "rustc_flags", [])
     rustc_flags.add_all(
         expand_list_element_locations(
             ctx,
