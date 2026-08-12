@@ -1091,11 +1091,39 @@ _RUST_TEST_ATTRS = {
     ),
 } | _COVERAGE_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS
 
+# `crate_identity` is intentionally restricted to library-producing rules and is
+# NOT part of `_COMMON_ATTRS`, so binaries, tests, examples, and build-script
+# executables never carry it. A Cargo package can legitimately contain both a
+# library and binaries; tagging every Cargo target with only its package ID
+# would incorrectly equate distinct Cargo targets.
+_CRATE_IDENTITY_ATTRS = {
+    "crate_identity": attr.string(
+        doc = dedent("""\
+            Optional logical identity of the upstream Rust library this target
+            represents.
+
+            When set, the configured library carries a `RustCrateIdentityInfo`
+            and participates in cross-link-unit crate-instance validation: a
+            native link unit may contain at most one configured crate instance
+            for each non-empty logical identity.
+
+            The `cargo:` prefix is reserved for crate generators (crate_universe
+            sets `crate_identity = "cargo:" + fully_qualified_cargo_package_id`
+            on generated library targets). Handwritten libraries should use a
+            reverse-domain or repository-qualified identifier, e.g.
+            `com.example:mylib`.
+
+            Leave empty (the default) for ordinary targets that opt out of this
+            facility.
+        """),
+    ),
+}
+
 rust_library = rule(
     implementation = _rust_library_impl,
     provides = COMMON_PROVIDERS,
     cfg = per_crate_flag_trim_transition,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | {
         "disable_pipelining": attr.bool(
             default = False,
             doc = dedent("""\
@@ -1268,7 +1296,7 @@ _rust_static_library_transition = transition(
 
 rust_static_library = rule(
     implementation = _rust_static_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS,
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | _PLATFORM_ATTRS,
     fragments = ["cpp"],
     cfg = _rust_static_library_transition,
     toolchains = [
@@ -1300,7 +1328,7 @@ def _rust_shared_library_transition_impl(settings, attr):
         _PER_CRATE_FLAG_SETTING: per_crate_flags,
     }
 
-_rust_shared_library_transition = transition(
+_rust_cdylib_library_transition = transition(
     implementation = _rust_shared_library_transition_impl,
     inputs = [
         "//command_line_option:platforms",
@@ -1330,9 +1358,9 @@ _CC_RUNTIME_LINKAGE_ATTRS = {
 
 rust_cdylib_library = rule(
     implementation = _rust_cdylib_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | _CC_RUNTIME_LINKAGE_ATTRS,
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | _CC_RUNTIME_LINKAGE_ATTRS,
     fragments = ["cpp"],
-    cfg = _rust_shared_library_transition,
+    cfg = _rust_cdylib_library_transition,
     toolchains = [
         str(Label("//rust:toolchain_type")),
         config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
@@ -1362,7 +1390,7 @@ rust_proc_macro = rule(
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
-    },
+    } | _CRATE_IDENTITY_ATTRS,
     fragments = ["cpp"],
     toolchains = [
         str(Label("//rust:toolchain_type")),

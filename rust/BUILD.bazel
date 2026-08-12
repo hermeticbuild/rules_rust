@@ -27,6 +27,7 @@ bzl_library(
         "//rust/private:bzl_lib",
         "//rust/settings:bzl_lib",
         "@bazel_features//:features",
+        "@rules_cc//cc:defs_bzl",
     ],
 )
 
