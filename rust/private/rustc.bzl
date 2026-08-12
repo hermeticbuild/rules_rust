@@ -2361,10 +2361,21 @@ def rustc_compile(
             continue
         for target in runfiles_attr:
             transitive_runfiles.append(target[DefaultInfo].default_runfiles)
-    if crate_info.type in ["bin", "cdylib", "staticlib"]:
+
+    # A test executable loads the same cc dynamic libraries as a bin, but it
+    # reports the type of the crate under test (e.g. "lib"), so it has to be
+    # matched on is_test rather than on type. Without this a rust_test's
+    # runfiles omit every dylib it needs, and the binary only runs where the
+    # execroot _solib_* directory happens to sit next to it -- true for local
+    # execution, false for remote execution, where the input tree is exactly the
+    # declared runfiles.
+    # Deps reached through `crate` (rust_test(crate = ...)) carry the CcInfo for
+    # such libraries, so that attribute is scanned alongside `deps`.
+    if crate_info.is_test or crate_info.type in ["bin", "cdylib", "staticlib"]:
+        cc_providing_deps = getattr(attr, "deps", []) + ([crate_attr] if crate_attr else [])
         dynamic_libraries = ctx.runfiles(files = [
             library_to_link.dynamic_library
-            for dep in getattr(attr, "deps", [])
+            for dep in cc_providing_deps
             if CcInfo in dep
             for linker_input in dep[CcInfo].linking_context.linker_inputs.to_list()
             for library_to_link in linker_input.libraries
