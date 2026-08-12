@@ -3,11 +3,13 @@ Tests for handling of cc_toolchain's static_runtime_lib/dynamic_runtime_lib.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "feature")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("@rules_cc//cc:action_names.bzl", "ACTION_NAMES")
+load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "feature", "flag_group", "flag_set")
 load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
-load("//rust:defs.bzl", "rust_shared_library", "rust_static_library")
+load("//rust:defs.bzl", "rust_binary", "rust_shared_library", "rust_static_library")
 
 def _test_cc_config_impl(ctx):
     config_info = cc_common.create_cc_toolchain_config_info(
@@ -22,6 +24,22 @@ def _test_cc_config_impl(ctx):
         abi_libc_version = "unknown",
         features = [
             feature(name = "static_link_cpp_runtimes", enabled = True),
+            feature(
+                name = "test_linker_driver_args",
+                enabled = True,
+                flag_sets = [
+                    flag_set(
+                        actions = [ACTION_NAMES.cpp_link_executable],
+                        flag_groups = [
+                            flag_group(flags = [
+                                "-unwindlib=none",
+                                "--unwindlib=none",
+                                "-Wl,--retained-link-arg",
+                            ]),
+                        ],
+                    ),
+                ],
+            ),
         ],
     )
     return config_info
@@ -67,8 +85,13 @@ with_extra_toolchain = rule(
 def _inputs_analysis_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut[DepActionsInfo].actions[0]
-    asserts.equals(env, action.mnemonic, "Rustc")
+    action = None
+    for candidate in tut[DepActionsInfo].actions:
+        if candidate.mnemonic == "Rustc":
+            action = candidate
+            break
+    if action == None:
+        fail("No Rustc action found")
     inputs = action.inputs.to_list()
     for expected in ctx.attr.expected_inputs:
         asserts.true(
@@ -201,4 +224,138 @@ def runtime_libs_test(name):
         name = "%s/static_library" % name,
         target_under_test = "%s/_static_library" % name,
         expected_inputs = ["dummy.a"],
+    )
+
+    rust_binary(
+        name = "%s/__binary" % name,
+        edition = "2018",
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary" % name,
+        target_under_test = "%s/_binary" % name,
+        expected_args = ["--codegen=link-arg=-Wl,--retained-link-arg"],
+        unexpected_args = [
+            "--codegen=link-arg=-unwindlib=none",
+            "--codegen=link-arg=--unwindlib=none",
+        ],
+    )
+
+    rust_binary(
+        name = "%s/__binary_with_default_linker_libraries" % name,
+        edition = "2018",
+        rustc_flags = ["-Cdefault-linker-libraries=yes"],
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary_with_default_linker_libraries" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary_with_default_linker_libraries" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary_with_default_linker_libraries" % name,
+        target_under_test = "%s/_binary_with_default_linker_libraries" % name,
+        expected_args = [
+            "--codegen=link-arg=-unwindlib=none",
+            "--codegen=link-arg=--unwindlib=none",
+            "--codegen=link-arg=-Wl,--retained-link-arg",
+        ],
+    )
+
+    rust_binary(
+        name = "%s/__binary_with_bare_default_linker_libraries" % name,
+        edition = "2018",
+        rustc_flags = ["-Cdefault-linker-libraries"],
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary_with_bare_default_linker_libraries" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary_with_bare_default_linker_libraries" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary_with_bare_default_linker_libraries" % name,
+        target_under_test = "%s/_binary_with_bare_default_linker_libraries" % name,
+        expected_args = [
+            "--codegen=link-arg=-unwindlib=none",
+            "--codegen=link-arg=--unwindlib=none",
+            "--codegen=link-arg=-Wl,--retained-link-arg",
+        ],
+    )
+
+    rust_binary(
+        name = "%s/__binary_with_disabled_default_linker_libraries" % name,
+        edition = "2018",
+        rustc_flags = [
+            "-Cdefault-linker-libraries=yes",
+            "-Cdefault-linker-libraries=no",
+        ],
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary_with_disabled_default_linker_libraries" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary_with_disabled_default_linker_libraries" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary_with_disabled_default_linker_libraries" % name,
+        target_under_test = "%s/_binary_with_disabled_default_linker_libraries" % name,
+        expected_args = ["--codegen=link-arg=-Wl,--retained-link-arg"],
+        unexpected_args = [
+            "--codegen=link-arg=-unwindlib=none",
+            "--codegen=link-arg=--unwindlib=none",
+        ],
+    )
+
+    write_file(
+        name = "%s/default_linker_libraries_flags" % name,
+        out = "%s/default_linker_libraries.rustc_flags" % name,
+        content = ["-Cdefault-linker-libraries=yes"],
+    )
+
+    rust_binary(
+        name = "%s/__binary_with_response_file" % name,
+        compile_data = ["%s/default_linker_libraries_flags" % name],
+        edition = "2018",
+        rustc_flags = ["@$(location %s/default_linker_libraries_flags)" % name],
+        srcs = ["main.rs"],
+        tags = ["manual", "nobuild"],
+    )
+
+    with_extra_toolchain(
+        name = "%s/_binary_with_response_file" % name,
+        extra_toolchain = ":%s/test_cc_toolchain" % name,
+        target = "%s/__binary_with_response_file" % name,
+        tags = ["manual"],
+    )
+
+    inputs_analysis_test(
+        name = "%s/binary_with_response_file" % name,
+        target_under_test = "%s/_binary_with_response_file" % name,
+        expected_args = [
+            "--codegen=link-arg=-unwindlib=none",
+            "--codegen=link-arg=--unwindlib=none",
+            "--codegen=link-arg=-Wl,--retained-link-arg",
+        ],
     )
