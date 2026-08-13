@@ -80,6 +80,13 @@ RustCrateIdentityInfo = provider(
         "The logical identity of a Rust library together with the specific configured crate " +
         "instance that implements it.\n\n" +
         "`logical_id` answers \"does this represent the same logical upstream Rust library?\" " +
+        "For generated Cargo libraries the logical identity is source-qualified: it encodes the " +
+        "Cargo source/provenance as well as name and version. Two instances with the same name " +
+        "and version but different sources (e.g. crates.io vs a private registry) therefore have " +
+        "different logical identities and are treated as distinct libraries; cross-registry " +
+        "duplication is accepted by design so a private registry may shadow a common name. The " +
+        "enforced invariant is per identity: within one native link unit there may be at most " +
+        "one configured crate instance for each source-qualified logical identity.\n\n" +
         "The `crate_instance` artifact answers \"is this actually the same compiled instance?\" " +
         "Equality of `crate_instance` means the same configured compilation output; target " +
         "configuration, enabled features, cfgs, toolchain, transitions, and recursively selected " +
@@ -89,7 +96,7 @@ RustCrateIdentityInfo = provider(
         "`owner` and `display_name` are diagnostic-only fields and do not participate in equality."
     ),
     fields = {
-        "logical_id": "str: Logical identity of the upstream Rust library whose runtime/type identity should be unique.",
+        "logical_id": "str: Source-qualified logical identity of the upstream Rust library whose runtime/type identity should be unique per link unit.",
         "crate_instance": "File: The configured crate output artifact (CrateInfo.output).",
         "owner": "Label: The label of the target that produced the crate only for diagnostics.",
         "display_name": "str: Short human-readable description for diagnostics only.",

@@ -15,8 +15,10 @@
 """Native (C/C++) link validation for Rust crate instances.
 
 Rust link rules validate their own target-runtime closure intrinsically (see
-`rust/private/rustc.bzl`). A native final link -- e.g. a `cc_binary` linking two
-`rust_static_library`s -- is outside that intrinsic check. This module supplies:
+`rust/private/rustc.bzl`) whenever a target carries `crate_identity`. A native
+final link -- e.g. a `cc_binary` linking two `rust_static_library`s -- is
+outside that intrinsic check and is **not** validated by default. This module is
+the opt-in affordance for native links:
 
 * `rust_link_validation_aspect`: applies the same per-link-unit invariant to
   native link units reached transitively. Enable it with
@@ -24,6 +26,11 @@ Rust link rules validate their own target-runtime closure intrinsically (see
 * `rust_link_checked_cc_binary` / `rust_link_checked_cc_test` /
   `rust_link_checked_cc_shared_library`: paved-path wrappers that force the
   check during analysis without adding linker inputs.
+
+Because plain `cc_binary`/`cc_test`/`cc_shared_library` are never checked unless
+one of these is applied, a C++ link that embeds duplicate Rust instances will
+still build silently by default. Use the wrappers or the command-line aspect
+wherever a native link may absorb Rust static crates.
 """
 
 load("@rules_cc//cc:defs.bzl", _cc_binary = "cc_binary", _cc_shared_library = "cc_shared_library", _cc_test = "cc_test")
@@ -94,7 +101,9 @@ rust_link_validation_aspect = aspect(
         "Traverses native dependency edges, accumulates the static Rust library identity " +
         "closures exposed by Rust targets, and enforces that each logical identity appears " +
         "with at most one configured crate instance within one native link unit (cc_binary, " +
-        "cc_test, cc_shared_library)."
+        "cc_test, cc_shared_library). NOTE: this aspect is opt-in -- it is only applied via " +
+        "the command line or the `rust_link_checked_*` wrappers. Plain native rules are not " +
+        "checked by default."
     ),
 )
 

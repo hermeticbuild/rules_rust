@@ -1107,11 +1107,22 @@ _CRATE_IDENTITY_ATTRS = {
             native link unit may contain at most one configured crate instance
             for each non-empty logical identity.
 
-            The `cargo:` prefix is reserved for crate generators (crate_universe
-            sets `crate_identity = "cargo:" + fully_qualified_cargo_package_id`
-            on generated library targets). Handwritten libraries should use a
-            reverse-domain or repository-qualified identifier, e.g.
-            `com.example:mylib`.
+            The `cargo:` prefix is reserved for generated Cargo library targets.
+            The crate generator emits a source-qualified identity of the form
+            `cargo:` + a canonical record encoding the Cargo package's source,
+            name, and version (e.g.
+            `cargo:["registry","sparse+https://index.crates.io/","log","0.4.22"]`).
+            The source is deliberately part of the identity: a Cargo package of
+            the same name and version pulled from two different registries is two
+            distinct logical libraries (private-registry shadowing of a common
+            name is intended), so cross-registry duplication is accepted rather
+            than flagged. The enforced invariant is per identity: within one
+            native link unit there may be at most one configured instance of each
+            source-qualified logical identity.
+
+            Handwritten libraries should use a reverse-domain or
+            repository-qualified identifier, e.g. `com.example:mylib`, and opt
+            out (or in) consciously.
 
             Leave empty (the default) for ordinary targets that opt out of this
             facility.
