@@ -85,22 +85,31 @@ _rust_link_checker = rule(
 
 def rust_link_checked_cc_binary(name, deps = [], **kwargs):
     """A `cc_binary` whose Rust identity closure is validated during analysis."""
-    _rust_link_checked(_cc_binary, name, deps, **kwargs)
+    _rust_link_checked(_cc_binary, name, deps, _default_testonly = False, **kwargs)
 
 def rust_link_checked_cc_test(name, deps = [], **kwargs):
     """A `cc_test` whose Rust identity closure is validated during analysis."""
-    _rust_link_checked(_cc_test, name, deps, **kwargs)
+    _rust_link_checked(_cc_test, name, deps, _default_testonly = True, **kwargs)
 
 def rust_link_checked_cc_shared_library(name, deps = [], **kwargs):
     """A `cc_shared_library` whose Rust identity closure is validated during analysis."""
-    _rust_link_checked(_cc_shared_library, name, deps, **kwargs)
+    _rust_link_checked(_cc_shared_library, name, deps, _default_testonly = False, **kwargs)
 
-def _rust_link_checked(cc_rule, name, deps, **kwargs):
+def _rust_link_checked(cc_rule, name, deps, _default_testonly, **kwargs):
     checker = "_" + name + "_crate_link_check"
+
+    # Mirror the wrapped target's testonly on the hidden checker. A checked
+    # *_test is implicitly a test target (and may wrap test-only Rust deps), so
+    # the checker must be testonly too, or the non-testonly checker tripping
+    # testonly validation would break an otherwise valid test. An explicit
+    # `testonly` passed to the wrapped target overrides the per-wrapper default.
+    testonly = kwargs.pop("testonly", _default_testonly)
+
     _rust_link_checker(
         name = checker,
         deps = deps,
         tags = ["manual"],
+        testonly = testonly,
     )
 
     # Forward the original deps plus the analysis-only checker. The checker
@@ -109,5 +118,6 @@ def _rust_link_checked(cc_rule, name, deps, **kwargs):
     cc_rule(
         name = name,
         deps = deps + [":" + checker],
+        testonly = testonly,
         **kwargs
     )

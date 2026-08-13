@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//rust:defs.bzl", "rust_common", "rust_library", "rust_shared_library", "rust_static_library")
-load("//rust:rust_link_validation.bzl", "rust_link_checked_cc_binary", "rust_link_checked_cc_shared_library")
+load("//rust:rust_link_validation.bzl", "rust_link_checked_cc_binary", "rust_link_checked_cc_shared_library", "rust_link_checked_cc_test")
 
 _IDENTITY = "cargo:registry+https://index.crates.io/#dup@1.0.0"
 
@@ -96,6 +96,15 @@ def rust_link_validation_native_test_suite(name):
     native_clean_test(
         name = "raw_unchecked_test",
         target_under_test = ":raw_unchecked",
+    )
+
+    # A test-only Rust static library for the testonly-propagation checks.
+    rust_static_library(
+        name = "testonly_static",
+        srcs = ["lib.rs"],
+        deps = [":class_one"],
+        crate_name = "testonly_static",
+        testonly = True,
     )
 
     # ---------------- checked conflict cases (fail) ----------------
@@ -233,6 +242,28 @@ def rust_link_validation_native_test_suite(name):
         expect_owners = ["class_one"],
     )
 
+    rust_link_checked_cc_test(
+        name = "checked_testonly_test",
+        srcs = ["main.cc"],
+        deps = [":testonly_static"],
+    )
+    native_clean_test(
+        name = "checked_testonly_test_ok",
+        target_under_test = ":checked_testonly_test",
+    )
+
+    # An explicitly test-only checked binary with a test-only Rust dep too.
+    rust_link_checked_cc_binary(
+        name = "checked_testonly_bin",
+        srcs = ["main.cc"],
+        deps = [":testonly_static"],
+        testonly = True,
+    )
+    native_clean_test(
+        name = "checked_testonly_bin_ok",
+        target_under_test = ":checked_testonly_bin",
+    )
+
     native.test_suite(
         name = name,
         tests = [
@@ -241,6 +272,8 @@ def rust_link_validation_native_test_suite(name):
             ":checked_separate_two_test",
             ":checked_shared_conflict_test",
             ":checked_shared_path_test",
+            ":checked_testonly_bin_ok",
+            ":checked_testonly_test_ok",
             ":checked_transitive_conflict_test",
             ":checked_two_dynamic_test",
             ":dynamic_closure_provider_test",
