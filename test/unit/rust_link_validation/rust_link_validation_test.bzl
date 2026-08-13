@@ -1,6 +1,7 @@
 """Analysis tests for the intrinsic Rust crate-instance link validation."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//rust:defs.bzl", "rust_binary", "rust_common", "rust_library", "rust_proc_macro", "rust_shared_library", "rust_static_library", "rust_test")
 
 _IDENTITY = "cargo:registry+https://index.crates.io/#dup@1.0.0"
@@ -163,6 +164,41 @@ def rust_link_validation_test_suite(name):
         target_under_test = ":proc_macro_isolation_bin",
     )
 
+    # Rust identities remain visible when static Rust libraries travel through
+    # ordinary native dependency edges on their way to a Rust terminal link.
+    rust_static_library(
+        name = "hidden_static_one",
+        srcs = ["lib.rs"],
+        deps = [":class_one"],
+        crate_name = "hidden_static_one",
+    )
+    rust_static_library(
+        name = "hidden_static_two",
+        srcs = ["lib.rs"],
+        deps = [":class_two"],
+        crate_name = "hidden_static_two",
+    )
+    cc_library(
+        name = "native_hidden_one",
+        deps = [":hidden_static_one"],
+    )
+    cc_library(
+        name = "native_hidden_two",
+        deps = [":hidden_static_two"],
+    )
+    rust_binary(
+        name = "native_hidden_same_instance_bin",
+        srcs = ["main.rs"],
+        link_deps = [
+            ":hidden_static_one",
+            ":native_hidden_one",
+        ],
+    )
+    link_clean_test(
+        name = "native_hidden_same_instance_bin_test",
+        target_under_test = ":native_hidden_same_instance_bin",
+    )
+
     # ---------------- fail: two instances in one link unit ----------------
     rust_binary(
         name = "direct_conflict_bin",
@@ -184,6 +220,20 @@ def rust_link_validation_test_suite(name):
     link_conflict_test(
         name = "transitive_conflict_bin_test",
         target_under_test = ":transitive_conflict_bin",
+    )
+
+    rust_binary(
+        name = "native_hidden_conflict_bin",
+        srcs = ["main.rs"],
+        link_deps = [
+            ":native_hidden_one",
+            ":native_hidden_two",
+        ],
+        tags = ["manual"],
+    )
+    link_conflict_test(
+        name = "native_hidden_conflict_bin_test",
+        target_under_test = ":native_hidden_conflict_bin",
     )
 
     rust_static_library(
@@ -237,6 +287,8 @@ def rust_link_validation_test_suite(name):
             ":direct_conflict_bin_test",
             ":different_identities_bin_test",
             ":identity_record_test",
+            ":native_hidden_conflict_bin_test",
+            ":native_hidden_same_instance_bin_test",
             ":plain_lib_has_no_identity_test",
             ":proc_macro_conflict_test",
             ":proc_macro_isolation_bin_test",

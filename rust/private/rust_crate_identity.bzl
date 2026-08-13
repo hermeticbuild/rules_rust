@@ -39,7 +39,7 @@ def validate_crate_identity_closure(owner, identities):
         if instances == None:
             instances = {}
             instances_by_id[logical_id] = instances
-        instances[str(identity.crate_instance)] = identity
+        instances[identity.crate_instance] = identity
 
     conflicting_ids = [
         logical_id

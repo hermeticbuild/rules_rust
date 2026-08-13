@@ -34,6 +34,7 @@ load(
     ":rust_allocator_libraries.bzl",
     "RUSTC_ALLOCATOR_LIBRARIES_ATTRS",
 )
+load(":rust_link_validation.bzl", "native_rust_link_validation_aspect")
 load(
     ":rustc.bzl",
     "UnstableSelfProfileInfo",
@@ -815,6 +816,7 @@ _COMMON_ATTRS = {
 
             These must be targets that provide `CrateInfo`, such as `rust_library`.
         """),
+        aspects = [native_rust_link_validation_aspect],
     ),
     "edition": attr.string(
         doc = "The rust edition to use for this crate. Defaults to the edition specified in the rust_toolchain.",
@@ -826,6 +828,7 @@ _COMMON_ATTRS = {
             These are typically `cc_library` targets.
         """),
         providers = [[CcInfo], [rust_common.crate_info]],
+        aspects = [native_rust_link_validation_aspect],
     ),
     "lint_config": attr.label(
         doc = "Set of lints to apply when building this crate.",

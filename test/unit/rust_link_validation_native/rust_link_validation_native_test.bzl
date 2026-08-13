@@ -214,6 +214,18 @@ def rust_link_validation_native_test_suite(name):
         expect_linkage = "static",
         expect_owners = ["class_one"],
     )
+    rust_library(
+        name = "native_bridge",
+        srcs = ["lib.rs"],
+        link_deps = [":native_mid_one"],
+        crate_name = "native_bridge",
+    )
+    closure_provider_test(
+        name = "native_bridge_closure_provider_test",
+        target_under_test = ":native_bridge",
+        expect_linkage = "static",
+        expect_owners = ["class_one"],
+    )
     closure_provider_test(
         name = "dynamic_closure_provider_test",
         target_under_test = ":dyn_lib_one",
@@ -232,6 +244,7 @@ def rust_link_validation_native_test_suite(name):
             ":checked_transitive_conflict_test",
             ":checked_two_dynamic_test",
             ":dynamic_closure_provider_test",
+            ":native_bridge_closure_provider_test",
             ":raw_unchecked_test",
             ":static_closure_provider_test",
         ],

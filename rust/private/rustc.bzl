@@ -44,6 +44,7 @@ load(
     _BuildInfo = "BuildInfo",
 )
 load(":rust_crate_identity.bzl", "validate_crate_identity_closure")
+load(":rust_link_validation.bzl", "RustLinkAggregationInfo")
 load(":rustc_resource_set.bzl", "get_rustc_resource_set", "is_codegen_units_enabled")
 load(":stamp.bzl", "is_stamping_enabled")
 load(
@@ -232,6 +233,17 @@ def _link_closure_identities(crate_info, dep_info):
         identity = getattr(linked_crate, "crate_identity", None)
         if identity != None:
             identities.append(identity)
+    return identities
+
+def _native_link_closure_identities(ctx):
+    """Returns Rust identities recovered through target-runtime native edges."""
+    identities = []
+    for attr_name in ("deps", "link_deps"):
+        if not hasattr(ctx.attr, attr_name):
+            continue
+        for dep in getattr(ctx.attr, attr_name):
+            if RustLinkAggregationInfo in dep:
+                identities.extend(dep[RustLinkAggregationInfo].crates.to_list())
     return identities
 
 def collect_deps(
@@ -2699,9 +2711,10 @@ def rustc_compile(
     # intrinsic link-unit validator below and for the native-boundary provider,
     # so there is only one approximation of Rust dependency filtering.
     link_identities = _link_closure_identities(crate_info, dep_info)
+    link_identities.extend(_native_link_closure_identities(ctx))
 
-    # Enforce the per-link-unit invariant during analysis, before any linker
-    # action is registered for this link unit.
+    # Enforce the per-link-unit invariant during analysis. Analysis failure
+    # prevents the invalid configured target's actions from becoming executable.
     if _is_terminal_link_unit(crate_info):
         validate_crate_identity_closure(ctx.label, link_identities)
 

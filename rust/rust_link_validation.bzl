@@ -14,11 +14,12 @@
 
 """Native (C/C++) link validation for Rust crate instances.
 
-Rust link rules validate their own target-runtime closure intrinsically (see
-`rust/private/rustc.bzl`) whenever a target carries `crate_identity`. A native
-final link -- e.g. a `cc_binary` linking two `rust_static_library`s -- is
-outside that intrinsic check and is **not** validated by default. This module is
-the opt-in affordance for native links:
+Rust link rules validate their target-runtime closure intrinsically (see
+`rust/private/rustc.bzl`). An internal aspect preserves identity metadata when
+static Rust libraries reach a Rust target through ordinary `cc_library` `deps`
+or `implementation_deps`. A native final link -- e.g. a `cc_binary` linking two
+`rust_static_library`s -- is outside that intrinsic check and is **not**
+validated by default. This module is the opt-in affordance for native links:
 
 * `rust_link_validation_aspect`: applies the same per-link-unit invariant to
   native link units reached transitively. Enable it with
@@ -31,88 +32,28 @@ Because plain `cc_binary`/`cc_test`/`cc_shared_library` are never checked unless
 one of these is applied, a C++ link that embeds duplicate Rust instances will
 still build silently by default. Use the wrappers or the command-line aspect
 wherever a native link may absorb Rust static crates.
+
+The aspect can follow declared `deps` and `implementation_deps`. It cannot
+recover identity after a custom rule discards the dependency graph, or from raw
+archives supplied through `srcs`, `linkopts`, linker scripts, or other
+untraversed attributes. Prebuilt Rust archives also remain invisible unless a
+rule attaches identity metadata to them.
 """
 
 load("@rules_cc//cc:defs.bzl", _cc_binary = "cc_binary", _cc_shared_library = "cc_shared_library", _cc_test = "cc_test")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//rust/private:providers.bzl", "RustLinkClosureInfo")
 load("//rust/private:rust_crate_identity.bzl", "validate_crate_identity_closure")
+load("//rust/private:rust_link_validation.bzl", _RustLinkAggregationInfo = "RustLinkAggregationInfo", _native_rust_link_validation_aspect = "native_rust_link_validation_aspect")
 
-# Private aggregation provider returned by the aspect. It is distinct from
-# RustLinkClosureInfo because Bazel does not allow an aspect and a target rule
-# to return the same provider type, and the aspect needs to carry its result
-# along the native shadow graph.
-RustLinkAggregationInfo = provider(
-    doc = "Aggregates static Rust identity closures along native dependency edges.",
-    fields = {
-        "crates": "depset[RustCrateIdentityInfo]: Static Rust identity closure reached so far.",
-    },
-)
-
-# Native dependency attributes the aspect traverses. Only these have the aspect
-# applied via `attr_aspects`, so only these can contribute aggregation results.
-_NATIVE_DEP_ATTRS = ["deps", "implementation_deps"]
-
-# Native link-unit rule kinds where the aggregated closure is finalized and the
-# invariant is enforced.
-_NATIVE_LINK_UNIT_KINDS = ("cc_binary", "cc_test", "cc_shared_library")
-
-def _rust_link_validation_aspect_impl(target, ctx):
-    """Propagates static Rust identity closures across native dep edges.
-
-    A target that exposes RustLinkClosureInfo is a Rust boundary: its closure is
-    already complete and authoritative, so it is a leaf of this shadow graph.
-    We never descend into a Rust target's own `deps` -- doing so would pull a
-    dynamic library's internal crates out of its private link boundary
-    (observed via cquery traces) and double-count static ones.
-    """
-    if RustLinkClosureInfo in target:
-        closure = target[RustLinkClosureInfo]
-        if closure.linkage != "static":
-            # Dynamic boundary: opaque. Contributes nothing and stops here.
-            return []
-        return [
-            RustLinkAggregationInfo(crates = closure.crates),
-        ]
-
-    crates = []
-    for attr_name in _NATIVE_DEP_ATTRS:
-        if not hasattr(ctx.rule.attr, attr_name):
-            continue
-        for dep in getattr(ctx.rule.attr, attr_name):
-            if RustLinkAggregationInfo in dep:
-                crates.append(dep[RustLinkAggregationInfo].crates)
-
-    if not crates:
-        return []
-
-    aggregation = RustLinkAggregationInfo(crates = depset(transitive = crates))
-
-    if ctx.rule.kind in _NATIVE_LINK_UNIT_KINDS:
-        validate_crate_identity_closure(ctx.label, aggregation.crates.to_list())
-
-    return [aggregation]
-
-rust_link_validation_aspect = aspect(
-    implementation = _rust_link_validation_aspect_impl,
-    attr_aspects = _NATIVE_DEP_ATTRS,
-    doc = (
-        "Traverses native dependency edges, accumulates the static Rust library identity " +
-        "closures exposed by Rust targets, and enforces that each logical identity appears " +
-        "with at most one configured crate instance within one native link unit (cc_binary, " +
-        "cc_test, cc_shared_library). NOTE: this aspect is opt-in -- it is only applied via " +
-        "the command line or the `rust_link_checked_*` wrappers. Plain native rules are not " +
-        "checked by default."
-    ),
-)
+rust_link_validation_aspect = _native_rust_link_validation_aspect
 
 def _rust_link_checker_impl(ctx):
     """Validates the Rust identity closure of the forwarded native deps."""
     crates = []
     for dep in ctx.attr.deps:
-        if RustLinkAggregationInfo in dep:
-            crates.append(dep[RustLinkAggregationInfo].crates)
+        if _RustLinkAggregationInfo in dep:
+            crates.append(dep[_RustLinkAggregationInfo].crates)
 
     identities = []
     for closure in crates:
