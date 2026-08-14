@@ -27,17 +27,7 @@ def _assert_cc_toolchain_absent_impl(ctx):
     env = analysistest.begin(ctx)
     cargo_action = _find_cargo_action(analysistest.target_under_test(env).actions)
     for var in ("CC", "CXX", "AR"):
-        value = cargo_action.env.get(var)
-        asserts.true(
-            env,
-            value != None,
-            "expected env var {} to be set, but it was missing".format(var),
-        )
-        asserts.true(
-            env,
-            "no_" + var.lower() in value,
-            "expected env var {} to point at the fallback tool, got: {}".format(var, value),
-        )
+        asserts.equals(env, None, cargo_action.env.get(var))
     return analysistest.end(env)
 
 _cc_toolchain_absent_with_flag_disabled_test = analysistest.make(

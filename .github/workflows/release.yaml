@@ -25,6 +25,7 @@ env:
 
 jobs:
   validation:
+    if: github.repository == 'bazelbuild/rules_rust'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4

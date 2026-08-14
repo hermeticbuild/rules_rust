@@ -15,7 +15,7 @@
 """Transition to trim per_crate_rustc_flag for non-matching targets.
 
 This module provides a configuration trimming mechanism for the
-`experimental_per_crate_rustc_flag` setting. When a target has
+`per_crate_rustc_flag` setting. When a target has
 `skip_per_crate_rustc_flags = True`, this transition clears the setting,
 putting the target back into a canonical configuration.
 
@@ -29,7 +29,7 @@ Usage:
     `skip_per_crate_rustc_flags = True` on generated rust_library targets.
 """
 
-_PER_CRATE_FLAG_SETTING = "@rules_rust//rust/settings:experimental_per_crate_rustc_flag"
+_PER_CRATE_FLAG_SETTING = "@rules_rust//rust/settings:per_crate_rustc_flag"
 
 def _per_crate_flag_trim_transition_impl(settings, attr):
     """Clear per_crate_rustc_flag for targets marked to skip it.

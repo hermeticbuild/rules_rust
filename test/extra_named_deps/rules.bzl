@@ -71,7 +71,7 @@ def _rust_library_with_extra_deps_impl(ctx):
             proc_macro_deps = [],
             aliases = ctx.attr.aliases,
             output = rust_lib,
-            rustc_output = generate_output_diagnostics(ctx, rust_lib),
+            rustc_output = generate_output_diagnostics(ctx, toolchain, rust_lib),
             metadata = None,
             metadata_supports_pipelining = False,
             rustc_rmeta_output = None,

@@ -6,12 +6,12 @@
 #     bazel run @@//test/vscode/3rdparty:crates_vendor
 ###############################################################################
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_proc_macro")
 
 package(default_visibility = ["//visibility:public"])
 
-rust_library(
-    name = "syn",
+rust_proc_macro(
+    name = "serde_derive",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -29,20 +29,19 @@ rust_library(
         ],
     ),
     crate_features = [
-        "clone-impls",
-        "derive",
-        "parsing",
-        "printing",
-        "proc-macro",
+        "default",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
+    rustc_env = {
+        "CARGO_PKG_VERSION_PATCH": "228",
+    },
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=syn",
+        "crate-name=serde_derive",
         "manual",
         "noclippy",
         "norustfmt",
@@ -104,10 +103,10 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-unknown-uefi": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    version = "3.0.4",
+    version = "1.0.228",
     deps = [
-        "@rtvsc__proc-macro2-1.0.107//:proc_macro2",
-        "@rtvsc__quote-1.0.47//:quote",
-        "@rtvsc__unicode-ident-1.0.24//:unicode_ident",
+        "@rtvsc__proc-macro2-1.0.106//:proc_macro2",
+        "@rtvsc__quote-1.0.46//:quote",
+        "@rtvsc__syn-2.0.118//:syn",
     ],
 )

@@ -15,7 +15,7 @@ load("@rules_rust//rust:defs.bzl", "rust_library")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "serde",
+    name = "quote",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -33,22 +33,16 @@ rust_library(
         ],
     ),
     crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
+        "proc-macro",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@rtvsc__serde_derive-1.0.229//:serde_derive",
-    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
@@ -110,10 +104,10 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-unknown-uefi": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    version = "1.0.229",
+    version = "1.0.46",
     deps = [
-        ":build_script_build",
-        "@rtvsc__serde_core-1.0.229//:serde_core",
+        "@rtvsc__proc-macro2-1.0.106//:proc_macro2",
+        "@rtvsc__quote-1.0.46//:build_script_build",
     ],
 )
 
@@ -123,9 +117,6 @@ cargo_build_script(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
-    build_script_env = {
-        "CARGO_PKG_VERSION_PATCH": "228",
-    },
     compile_data = glob(
         include = ["**"],
         allow_empty = True,
@@ -140,10 +131,7 @@ cargo_build_script(
         ],
     ),
     crate_features = [
-        "default",
-        "derive",
-        "serde_derive",
-        "std",
+        "proc-macro",
     ],
     crate_name = "build_script_build",
     crate_root = "build.rs",
@@ -161,18 +149,18 @@ cargo_build_script(
     ),
     edition = "2021",
     emit_warnings = False,
-    pkg_name = "serde",
+    pkg_name = "quote",
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=quote",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.229",
+    version = "1.0.46",
     visibility = ["//visibility:private"],
 )
 
