@@ -153,7 +153,7 @@ def _distributed_thin_lto_library(ctx):
         file.basename
         for linker_input in linker_inputs
         for library in linker_input.libraries
-        for file in library.lto_bitcode_files
+        for file in library.lto_bitcode_files + library.pic_lto_bitcode_files
     ]
     asserts.true(env, any([name.startswith("libdistributed_lib-") and name.endswith(".rlib.o") for name in lto_bitcode_files]))
 

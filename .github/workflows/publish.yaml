@@ -26,6 +26,7 @@ on:
         description: Override the ref to read .bcr templates from
 jobs:
   publish:
+    if: github.repository == 'bazelbuild/rules_rust'
     uses: bazel-contrib/publish-to-bcr/.github/workflows/publish.yaml@v1.4.1
     with:
       author_name: bazel-io

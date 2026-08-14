@@ -65,7 +65,7 @@ load(
 # TODO(marco): Separate each rule into its own file.
 
 # Setting path for per_crate_rustc_flag, used in transition definitions
-_PER_CRATE_FLAG_SETTING = "@rules_rust//rust/settings:experimental_per_crate_rustc_flag"
+_PER_CRATE_FLAG_SETTING = "@rules_rust//rust/settings:per_crate_rustc_flag"
 
 def _toolchain_make_variables(ctx):
     make_variables = {}
@@ -925,7 +925,7 @@ _COMMON_ATTRS = {
     ),
     "skip_per_crate_rustc_flags": attr.bool(
         doc = dedent("""\
-            If True, the `experimental_per_crate_rustc_flag` setting is trimmed from this
+            If True, the `per_crate_rustc_flag` setting is trimmed from this
             target's configuration. This puts the target back into a canonical configuration,
             improving cache hit rates for targets that would never match any per-crate filter.
 

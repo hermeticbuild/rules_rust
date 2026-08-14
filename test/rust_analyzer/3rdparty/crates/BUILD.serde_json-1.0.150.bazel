@@ -9,13 +9,19 @@
 load(
     "@rules_rust//cargo:defs.bzl",
     "cargo_build_script",
+    "cargo_toml_env_vars",
 )
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
+cargo_toml_env_vars(
+    name = "cargo_toml_env_vars",
+    src = "Cargo.toml",
+)
+
 rust_library(
-    name = "serde",
+    name = "serde_json",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -34,21 +40,19 @@ rust_library(
     ),
     crate_features = [
         "default",
-        "derive",
-        "serde_derive",
         "std",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
-    proc_macro_deps = [
-        "@rtra__serde_derive-1.0.229//:serde_derive",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
     ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
@@ -110,10 +114,13 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-unknown-uefi": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    version = "1.0.229",
+    version = "1.0.150",
     deps = [
-        "@rtra__serde-1.0.229//:build_script_build",
-        "@rtra__serde_core-1.0.229//:serde_core",
+        "@rtra__itoa-1.0.18//:itoa",
+        "@rtra__memchr-2.8.3//:memchr",
+        "@rtra__serde_core-1.0.228//:serde_core",
+        "@rtra__serde_json-1.0.150//:build_script_build",
+        "@rtra__zmij-1.0.21//:zmij",
     ],
 )
 
@@ -123,9 +130,6 @@ cargo_build_script(
         include = ["**/*.rs"],
         allow_empty = True,
     ),
-    build_script_env = {
-        "CARGO_PKG_VERSION_PATCH": "228",
-    },
     compile_data = glob(
         include = ["**"],
         allow_empty = True,
@@ -141,8 +145,6 @@ cargo_build_script(
     ),
     crate_features = [
         "default",
-        "derive",
-        "serde_derive",
         "std",
     ],
     crate_name = "build_script_build",
@@ -161,18 +163,21 @@ cargo_build_script(
     ),
     edition = "2021",
     emit_warnings = False,
-    pkg_name = "serde",
+    pkg_name = "serde_json",
+    rustc_env_files = [
+        ":cargo_toml_env_vars",
+    ],
     rustc_flags = [
         "--cap-lints=allow",
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=serde",
+        "crate-name=serde_json",
         "manual",
         "noclippy",
         "norustfmt",
     ],
-    version = "1.0.229",
+    version = "1.0.150",
     visibility = ["//visibility:private"],
 )
 

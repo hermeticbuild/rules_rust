@@ -6,16 +6,12 @@
 #     bazel run @@//test/vscode/3rdparty:crates_vendor
 ###############################################################################
 
-load(
-    "@rules_rust//cargo:defs.bzl",
-    "cargo_build_script",
-)
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "zmij",
+    name = "syn",
     srcs = glob(
         include = ["**/*.rs"],
         allow_empty = True,
@@ -32,6 +28,13 @@ rust_library(
             "WORKSPACE.bazel",
         ],
     ),
+    crate_features = [
+        "clone-impls",
+        "derive",
+        "parsing",
+        "printing",
+        "proc-macro",
+    ],
     crate_root = "src/lib.rs",
     edition = "2021",
     rustc_flags = [
@@ -39,7 +42,7 @@ rust_library(
     ],
     tags = [
         "cargo-bazel",
-        "crate-name=zmij",
+        "crate-name=syn",
         "manual",
         "noclippy",
         "norustfmt",
@@ -101,64 +104,10 @@ rust_library(
         "@rules_rust//rust/platform:x86_64-unknown-uefi": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    version = "1.0.23",
+    version = "2.0.118",
     deps = [
-        "@rtvsc__zmij-1.0.23//:build_script_build",
+        "@rtvsc__proc-macro2-1.0.106//:proc_macro2",
+        "@rtvsc__quote-1.0.46//:quote",
+        "@rtvsc__unicode-ident-1.0.24//:unicode_ident",
     ],
-)
-
-cargo_build_script(
-    name = "_bs",
-    srcs = glob(
-        include = ["**/*.rs"],
-        allow_empty = True,
-    ),
-    compile_data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            "**/*.rs",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    crate_name = "build_script_build",
-    crate_root = "build.rs",
-    data = glob(
-        include = ["**"],
-        allow_empty = True,
-        exclude = [
-            "**/* *",
-            ".tmp_git_root/**/*",
-            "BUILD",
-            "BUILD.bazel",
-            "WORKSPACE",
-            "WORKSPACE.bazel",
-        ],
-    ),
-    edition = "2021",
-    emit_warnings = False,
-    pkg_name = "zmij",
-    rustc_flags = [
-        "--cap-lints=allow",
-    ],
-    tags = [
-        "cargo-bazel",
-        "crate-name=zmij",
-        "manual",
-        "noclippy",
-        "norustfmt",
-    ],
-    version = "1.0.23",
-    visibility = ["//visibility:private"],
-)
-
-alias(
-    name = "build_script_build",
-    actual = ":_bs",
-    tags = ["manual"],
 )

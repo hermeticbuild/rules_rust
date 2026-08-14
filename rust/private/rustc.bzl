@@ -2471,7 +2471,7 @@ def rustc_compile(
         cc_toolchain = cc_toolchain,
         feature_configuration = feature_configuration,
         crate_type = crate_info.type,
-        compilation_mode = compilation_mode,
+        compilation_mode = ctx.var["COMPILATION_MODE"],
         toolchain = rust_toolchain,
     )
     providers += establish_cc_info(
@@ -2527,7 +2527,8 @@ def rustc_compile_action(
         crate_info_dict = None,
         skip_expanding_rustc_env = False,
         include_coverage = True,
-        allowed_unstable_rust_features = None):
+        allowed_unstable_rust_features = None,
+        extra_named_deps = None):
     result = rustc_compile(
         ctx = ctx,
         attr = attr,
@@ -2540,6 +2541,7 @@ def rustc_compile_action(
         skip_expanding_rustc_env = skip_expanding_rustc_env,
         include_coverage = include_coverage,
         allowed_unstable_rust_features = allowed_unstable_rust_features,
+        extra_named_deps = extra_named_deps,
     )
     providers = result.providers
 
