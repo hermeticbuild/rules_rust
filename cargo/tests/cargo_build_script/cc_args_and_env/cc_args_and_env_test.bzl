@@ -239,6 +239,8 @@ def _cc_args_and_env_analysis_test_impl(ctx):
 
     for env_var, expected_flags in _ENV_VAR_TO_EXPECTED_ARGS.items():
         actual_flags = cargo_action.env[env_var].split(" ")
+        if not cargo_action.env["TARGET"].endswith("-msvc"):
+            expected_flags = expected_flags + ["-ffile-prefix-map=${pwd}=."]
         for flag in expected_flags:
             asserts.true(
                 env,
