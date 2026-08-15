@@ -585,6 +585,9 @@ def _cargo_build_script_impl(ctx):
         # Populate CFLAGS and CXXFLAGS that cc-rs relies on when building from source, in particular
         # to determine the deployment target when building for apple platforms (`macosx-version-min`
         # for example, itself derived from the `macos_minimum_os` Bazel argument).
+        if toolchain.target_abi != "msvc":
+            cc_c_args = cc_c_args + ["-ffile-prefix-map=${pwd}=."]
+            cc_cxx_args = cc_cxx_args + ["-ffile-prefix-map=${pwd}=."]
         env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args))
         env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args))
         # It may be tempting to forward ARFLAGS, but cc-rs is opinionated enough
