@@ -398,6 +398,7 @@ rust_toolchain(
     dylib_ext = "{dylib_ext}",
     stdlib_linkflags = [{stdlib_linkflags}],
     default_edition = "{default_edition}",
+    default_panic_strategy = "{default_panic_strategy}",
     exec_triple = "{exec_triple}",
     target_triple = "{target_triple}",
     visibility = ["//visibility:public"],
@@ -433,6 +434,7 @@ rust_toolchain(
     dylib_ext = "{dylib_ext}",
     stdlib_linkflags = [{stdlib_linkflags}],
     default_edition = "{default_edition}",
+    default_panic_strategy = "{default_panic_strategy}",
     exec_triple = "{exec_triple}",
     target_triple = "{target_triple}",
     visibility = ["//visibility:public"],
@@ -457,6 +459,7 @@ def BUILD_for_rust_toolchain(
         allocator_library = None,
         global_allocator_library = None,
         default_edition = "",
+        default_panic_strategy = "unwind",
         include_rustfmt = False,
         include_llvm_tools = False,
         include_linker = False,
@@ -480,6 +483,7 @@ def BUILD_for_rust_toolchain(
                                                   This target is only used in the target configuration; exec builds still use the symbols provided
                                                   by the `allocator_library` target.
         default_edition (str): Default Rust edition.
+        default_panic_strategy (str): Default panic strategy reported by rustc for the target triple.
         include_rustfmt (bool): Whether rustfmt is present in the toolchain.
         include_llvm_tools (bool): Whether llvm-tools are present in the toolchain.
         include_linker (bool): Whether a linker is available in the toolchain.
@@ -540,6 +544,7 @@ def BUILD_for_rust_toolchain(
         global_allocator_library = repr(global_allocator_library_label),
         stdlib_linkflags = stdlib_linkflags,
         default_edition = default_edition,
+        default_panic_strategy = default_panic_strategy,
         exec_triple = exec_triple.str,
         target_triple = target_triple.str,
         rustfmt_label = repr(rustfmt_label),

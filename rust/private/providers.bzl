@@ -221,7 +221,13 @@ AllocatorLibrariesInfo = provider(
         "allocator_library": "Optional[AllocatorLibrariesImplInfo]: used when the default Rust allocator is used",
         "global_allocator_library": "Optional[AllocatorLibrariesImplInfo]: used when a global Rust allocator is used",
         "libstd_and_allocator_ccinfo": "Optional[CcInfo]: used when the default rust allocator is used",
+        "libstd_and_allocator_ccinfos": "Dict[String, CcInfo]: std and default allocator libraries keyed by panic strategy",
         "libstd_and_global_allocator_ccinfo": "Optional[CcInfo]: used when a global rust allocator is used",
+        "libstd_and_global_allocator_ccinfos": "Dict[String, CcInfo]: std and global allocator libraries keyed by panic strategy",
+        "libtest_and_allocator_ccinfo": "Optional[CcInfo]: used by tests with the default rust allocator",
+        "libtest_and_allocator_ccinfos": "Dict[String, CcInfo]: libtest, std, and default allocator libraries keyed by panic strategy",
+        "libtest_and_global_allocator_ccinfo": "Optional[CcInfo]: used by tests with a global rust allocator",
+        "libtest_and_global_allocator_ccinfos": "Dict[String, CcInfo]: libtest, std, and global allocator libraries keyed by panic strategy",
         "nostd_and_global_allocator_ccinfo": "Optional[CcInfo]: used when nostd with a global rust allocator is used",
     },
 )
@@ -230,6 +236,13 @@ AllocatorLibrariesImplInfo = provider(
     doc = "AllocatorLibrariesImplInfo provides the Rust-generated allocator LibraryToLink.",
     fields = {
         "library_to_link": "Optional[LibraryToLink]: the allocator library and its LTO metadata.",
+    },
+)
+
+RustCcInfo = provider(
+    doc = "Internal CcInfo for Rust-to-Rust propagation, before adding the final std/allocator closure.",
+    fields = {
+        "cc_info_without_std": "CcInfo: Rust crate and native dependency linkage without std/allocator inputs",
     },
 )
 

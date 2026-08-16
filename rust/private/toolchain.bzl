@@ -536,6 +536,7 @@ def _rust_toolchain_impl(ctx):
     target_arch = None
     target_os = None
     target_abi = None
+    default_panic_strategy = ctx.attr.default_panic_strategy
 
     if ctx.attr.target_triple:
         target_triple = triple(ctx.attr.target_triple)
@@ -559,6 +560,7 @@ def _rust_toolchain_impl(ctx):
             target_os = target_json_content["os"]
         if "env" in target_json_content:
             target_abi = target_json_content["env"]
+        default_panic_strategy = target_json_content.get("panic-strategy", default_panic_strategy)
     else:
         fail("Either `target_triple` or `target_json` must be provided. Please update {}".format(
             ctx.label,
@@ -588,7 +590,16 @@ def _rust_toolchain_impl(ctx):
 
     experimental_link_std_dylib = _experimental_link_std_dylib(ctx)
 
-    def make_ccinfo(label, actions, allocator_library, std):
+    # Targets without an unwind runtime necessarily default to abort. Built-in
+    # targets supported by cc_common.link otherwise use rustc's unwind default;
+    # custom target JSON can override it above.
+    if default_panic_strategy == "unwind" and not any([
+        "panic_unwind" in f.basename
+        for f in rust_std[rust_common.stdlib_info].between_core_and_std_files
+    ]):
+        default_panic_strategy = "abort"
+
+    def make_ccinfo(label, actions, allocator_library, std, panic_strategy = "unwind"):
         return make_libstd_and_allocator_ccinfo(
             cc_toolchain = cc_toolchain,
             feature_configuration = feature_configuration,
@@ -598,15 +609,23 @@ def _rust_toolchain_impl(ctx):
             rust_std = rust_std,
             allocator_library = allocator_library,
             std = std,
+            panic_strategy = panic_strategy,
         )
 
-    def make_local_ccinfo(allocator_library, std):
+    def make_local_ccinfo(allocator_library, std, panic_strategy = "unwind"):
         return make_ccinfo(
             ctx.label,
             ctx.actions,
             struct(cc_info = allocator_library),
             std,
+            panic_strategy,
         )
+
+    def make_local_ccinfos(allocator_library, std):
+        return {
+            panic_strategy: make_local_ccinfo(allocator_library, std, panic_strategy)
+            for panic_strategy in ("unwind", "abort", "immediate-abort")
+        }
 
     # Include C++ toolchain files to ensure tools like 'ar' are available for cross-compilation
     all_files_depsets = [sysroot.all_files]
@@ -631,8 +650,15 @@ def _rust_toolchain_impl(ctx):
         env = ctx.attr.env,
         exec_triple = exec_triple,
         iso_date = ctx.attr.iso_date,
+        default_panic_strategy = default_panic_strategy,
         libstd_and_allocator_ccinfo = make_local_ccinfo(ctx.attr.allocator_library[CcInfo], "std"),
+        libstd_and_allocator_ccinfos = make_local_ccinfos(ctx.attr.allocator_library[CcInfo], "std"),
         libstd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "std"),
+        libstd_and_global_allocator_ccinfos = make_local_ccinfos(ctx.attr.global_allocator_library[CcInfo], "std"),
+        libtest_and_allocator_ccinfo = make_local_ccinfo(ctx.attr.allocator_library[CcInfo], "test"),
+        libtest_and_allocator_ccinfos = make_local_ccinfos(ctx.attr.allocator_library[CcInfo], "test"),
+        libtest_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "test"),
+        libtest_and_global_allocator_ccinfos = make_local_ccinfos(ctx.attr.global_allocator_library[CcInfo], "test"),
         nostd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "no_std_with_alloc"),
         make_libstd_and_allocator_ccinfo = make_ccinfo,
         linker = sysroot.linker,
@@ -741,6 +767,11 @@ rust_toolchain = rule(
                 "The edition to use for rust_* rules that don't specify an edition. " +
                 "If absent, every rule is required to specify its `edition` attribute."
             ),
+        ),
+        "default_panic_strategy": attr.string(
+            default = "unwind",
+            doc = "Default panic strategy reported by rustc for the target triple.",
+            values = ["unwind", "abort", "immediate-abort"],
         ),
         "dylib_ext": attr.string(
             doc = "The extension for dynamic libraries created from rustc.",

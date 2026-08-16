@@ -24,6 +24,7 @@ def _toolchain_specifies_target_json_test_impl(ctx):
 
     asserts.equals(env, None, toolchain_info.target_triple)
     asserts.equals(env, "x86_64", toolchain_info.target_arch)
+    asserts.equals(env, ctx.attr.expected_panic_strategy, toolchain_info.default_panic_strategy)
 
     # The specific name here is not as valuable as identifying that `target_json` is a json file
     expected_basename = "{}.target.json".format(target.label.name)
@@ -88,7 +89,10 @@ def _std_libs_support_srcs_outside_package_test_impl(ctx):
     return analysistest.end(env)
 
 toolchain_specifies_target_triple_test = analysistest.make(_toolchain_specifies_target_triple_test_impl)
-toolchain_specifies_target_json_test = analysistest.make(_toolchain_specifies_target_json_test_impl)
+toolchain_specifies_target_json_test = analysistest.make(
+    _toolchain_specifies_target_json_test_impl,
+    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
+)
 toolchain_location_expands_linkflags_test = analysistest.make(_toolchain_location_expands_linkflags_impl)
 toolchain_location_expands_extra_rustc_flags_test = analysistest.make(_toolchain_location_expands_extra_rustc_flags_impl)
 std_libs_support_srcs_outside_package_test = analysistest.make(_std_libs_support_srcs_outside_package_test_impl)
@@ -183,6 +187,7 @@ def _define_test_targets():
                 "arch": "x86_64",
                 "env": "gnu",
                 "llvm-target": "x86_64-unknown-linux-gnu",
+                "panic-strategy": "immediate-abort",
                 "target-family": ["unix"],
                 "target-pointer-width": "64",
             },
@@ -220,10 +225,12 @@ def toolchain_test_suite(name):
     toolchain_specifies_target_json_test(
         name = "toolchain_specifies_target_json_test",
         target_under_test = ":rust_json_toolchain",
+        expected_panic_strategy = "abort",
     )
     toolchain_specifies_target_json_test(
         name = "toolchain_specifies_inline_target_json_test",
         target_under_test = ":rust_inline_json_toolchain",
+        expected_panic_strategy = "immediate-abort",
     )
     toolchain_location_expands_linkflags_test(
         name = "toolchain_location_expands_linkflags_test",

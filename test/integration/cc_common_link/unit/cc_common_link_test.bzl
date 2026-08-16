@@ -162,6 +162,53 @@ custom_malloc_test = analysistest.make(
     },
 )
 
+def _panic_runtime_selection_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+    links = [action for action in registered_actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(links))
+
+    cmdline = " ".join(links[0].argv)
+    asserts.true(
+        env,
+        ctx.attr.expected_runtime in cmdline,
+        "expected {} in linker invocation".format(ctx.attr.expected_runtime),
+    )
+    asserts.false(
+        env,
+        ctx.attr.unexpected_runtime in cmdline,
+        "did not expect {} in linker invocation".format(ctx.attr.unexpected_runtime),
+    )
+    return analysistest.end(env)
+
+panic_runtime_selection_test = analysistest.make(
+    _panic_runtime_selection_test,
+    attrs = {
+        "expected_runtime": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(mandatory = True),
+    },
+)
+
+def _libtest_selection_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+    links = [action for action in registered_actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(links))
+
+    cmdline = " ".join(links[0].argv)
+    asserts.equals(
+        env,
+        ctx.attr.expect_libtest,
+        "libtest" in cmdline,
+        "linker invocation should {}contain libtest".format("" if ctx.attr.expect_libtest else "not "),
+    )
+    return analysistest.end(env)
+
+libtest_selection_test = analysistest.make(
+    _libtest_selection_test,
+    attrs = {"expect_libtest": attr.bool()},
+)
+
 def _cc_common_link_test_targets():
     """Generate targets and tests."""
 
@@ -183,6 +230,18 @@ def _cc_common_link_test_targets():
     use_cc_common_link_on_target(
         name = "bin_with_cc_common_link",
         target = ":bin",
+    )
+
+    rust_binary(
+        name = "panic_abort_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        rustc_flags = ["-Cpanic=abort"],
+    )
+
+    use_cc_common_link_on_target(
+        name = "panic_abort_bin_with_cc_common_link",
+        target = ":panic_abort_bin",
     )
 
     rust_binary(
@@ -217,6 +276,19 @@ def _cc_common_link_test_targets():
     use_cc_common_link_on_target(
         name = "test_with_cc_common_link",
         target = ":test_with_srcs",
+        testonly = True,
+    )
+
+    rust_test(
+        name = "test_with_custom_main",
+        srcs = ["bin.rs"],
+        edition = "2018",
+        use_libtest_harness = False,
+    )
+
+    use_cc_common_link_on_target(
+        name = "test_with_custom_main_and_cc_common_link",
+        target = ":test_with_custom_main",
         testonly = True,
     )
 
@@ -266,6 +338,36 @@ def _cc_common_link_test_targets():
         target_under_test = ":bin_with_cc_common_link",
     )
 
+    panic_runtime_selection_test(
+        name = "default_panic_runtime_is_unwind",
+        target_under_test = ":bin_with_cc_common_link",
+        expected_runtime = "panic_unwind",
+        unexpected_runtime = "panic_abort",
+    )
+
+    panic_runtime_selection_test(
+        name = "panic_abort_runtime_is_abort",
+        target_under_test = ":panic_abort_bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
+    )
+
+    libtest_selection_test(
+        name = "binary_does_not_link_libtest",
+        target_under_test = ":bin_with_cc_common_link",
+    )
+
+    libtest_selection_test(
+        name = "test_links_libtest",
+        target_under_test = ":test_with_cc_common_link",
+        expect_libtest = True,
+    )
+
+    libtest_selection_test(
+        name = "test_without_harness_does_not_link_libtest",
+        target_under_test = ":test_with_custom_main_and_cc_common_link",
+    )
+
     bpf_linker_ignores_cc_args_test(
         name = "bpf_linker_ignores_cc_args_test",
         target_under_test = ":bin_with_collect_dep_actions",
@@ -278,6 +380,11 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_crate_test",
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
+        "default_panic_runtime_is_unwind",
+        "panic_abort_runtime_is_abort",
+        "binary_does_not_link_libtest",
+        "test_links_libtest",
+        "test_without_harness_does_not_link_libtest",
         "bpf_linker_ignores_cc_args_test",
     ]
 

@@ -6,7 +6,7 @@ load("@rules_proto//proto:proto_common.bzl", proto_toolchains = "toolchains")
 load("@rules_rust//rust:defs.bzl", "rust_analyzer_aspect", "rust_common")
 
 # buildifier: disable=bzl-visibility
-load("@rules_rust//rust/private:providers.bzl", "RustAnalyzerGroupInfo", "RustAnalyzerInfo")
+load("@rules_rust//rust/private:providers.bzl", "RustAnalyzerGroupInfo", "RustAnalyzerInfo", "RustCcInfo")
 
 # buildifier: disable=bzl-visibility
 load("@rules_rust//rust/private:rust.bzl", "RUSTC_ATTRS")
@@ -141,6 +141,9 @@ def _get_dep_info(providers):
 def _get_cc_info(providers):
     """Finds the CcInfo provider in the list of providers."""
     for provider in providers:
+        if hasattr(provider, "cc_info_without_std"):
+            return provider.cc_info_without_std
+    for provider in providers:
         if hasattr(provider, "linking_context"):
             return provider
     fail("Couldn't find a CcInfo in the list of providers")
@@ -258,7 +261,7 @@ def _rust_prost_aspect_impl(target, ctx):
             runtime_deps.append(rust_common.dep_variant_info(
                 crate_info = prost_runtime[rust_common.crate_info] if rust_common.crate_info in prost_runtime else None,
                 dep_info = prost_runtime[rust_common.dep_info] if rust_common.dep_info in prost_runtime else None,
-                cc_info = prost_runtime[CcInfo] if CcInfo in prost_runtime else None,
+                cc_info = prost_runtime[RustCcInfo].cc_info_without_std if RustCcInfo in prost_runtime else (prost_runtime[CcInfo] if CcInfo in prost_runtime else None),
                 build_info = None,
             ))
         if RustAnalyzerInfo in prost_runtime:
@@ -565,7 +568,7 @@ def _current_prost_runtime_impl(ctx):
             runtime_deps.append(rust_common.dep_variant_info(
                 crate_info = target[rust_common.crate_info] if rust_common.crate_info in target else None,
                 dep_info = target[rust_common.dep_info] if rust_common.dep_info in target else None,
-                cc_info = target[CcInfo] if CcInfo in target else None,
+                cc_info = target[RustCcInfo].cc_info_without_std if RustCcInfo in target else (target[CcInfo] if CcInfo in target else None),
                 build_info = None,
             ))
 
