@@ -256,6 +256,14 @@ def toolchain_generated_sysroot():
         visibility = ["//visibility:public"],
     )
 
+def use_hermetic_macos_sdkroot():
+    """Use the hermetic macOS SDK when the C/C++ toolchain supplies no SDKROOT."""
+    bool_flag(
+        name = "use_hermetic_macos_sdkroot",
+        scope = "universal",
+        build_setting_default = True,
+    )
+
 def experimental_link_std_dylib():
     """A flag to control whether to link libstd dynamically."""
     bool_flag(

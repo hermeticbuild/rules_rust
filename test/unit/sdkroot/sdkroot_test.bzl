@@ -101,6 +101,20 @@ _rust_binary_with_cc_toolchain = rule(
     },
 )
 
+def _exec_sdkroot_subject_impl(ctx):
+    return [ctx.attr.target[_RustcActionsInfo]]
+
+_exec_sdkroot_subject = rule(
+    implementation = _exec_sdkroot_subject_impl,
+    attrs = {
+        "target": attr.label(
+            cfg = "exec",
+            mandatory = True,
+            providers = [_RustcActionsInfo],
+        ),
+    },
+)
+
 def _sdkroot_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
@@ -118,7 +132,21 @@ _sdkroot_test = analysistest.make(
     },
 )
 
-def _sdkroot_subject(name, cc_sdkroot = "", apple_sdk_platform = ""):
+_sdkroot_disabled_test = analysistest.make(
+    _sdkroot_test_impl,
+    attrs = {
+        "expected_sdkroot": attr.string(mandatory = True),
+    },
+    config_settings = {
+        str(Label("//rust/settings:use_hermetic_macos_sdkroot")): False,
+    },
+)
+
+def _sdkroot_subject(
+        name,
+        cc_sdkroot = "",
+        apple_sdk_platform = "",
+        macos_sdkroot = "fallback.sdkroot"):
     _cc_toolchain_config(
         name = name + "_cc_toolchain_config",
         apple_sdk_platform = apple_sdk_platform,
@@ -144,7 +172,7 @@ def _sdkroot_subject(name, cc_sdkroot = "", apple_sdk_platform = ""):
     rust_binary(
         name = name + "_binary",
         srcs = ["main.rs"],
-        macos_sdkroot = "fallback.sdkroot",
+        macos_sdkroot = macos_sdkroot,
         tags = ["manual", "nobuild"],
     )
     _rust_binary_with_cc_toolchain(
@@ -176,6 +204,36 @@ def sdkroot_test_suite(name):
     )
 
     _sdkroot_subject(
+        name = "disabled_default_sdkroot",
+        macos_sdkroot = None,
+    )
+    _sdkroot_disabled_test(
+        name = "disabled_default_sdkroot_test",
+        expected_sdkroot = "",
+        target_under_test = ":disabled_default_sdkroot_subject",
+    )
+    _exec_sdkroot_subject(
+        name = "disabled_exec_sdkroot_subject",
+        target = ":disabled_default_sdkroot_subject",
+        tags = ["manual"],
+    )
+    _sdkroot_disabled_test(
+        name = "disabled_exec_sdkroot_test",
+        expected_sdkroot = "",
+        target_under_test = ":disabled_exec_sdkroot_subject",
+    )
+    _sdkroot_disabled_test(
+        name = "disabled_explicit_sdkroot_test",
+        expected_sdkroot = _FALLBACK_SDKROOT,
+        target_under_test = ":fallback_sdkroot_subject",
+    )
+    _sdkroot_disabled_test(
+        name = "disabled_cc_sdkroot_test",
+        expected_sdkroot = _CC_SDKROOT,
+        target_under_test = ":cc_sdkroot_subject",
+    )
+
+    _sdkroot_subject(
         name = "apple_sdk_platform",
         apple_sdk_platform = "MacOSX",
     )
@@ -190,6 +248,10 @@ def sdkroot_test_suite(name):
         tests = [
             ":apple_sdk_platform_test",
             ":cc_sdkroot_test",
+            ":disabled_cc_sdkroot_test",
+            ":disabled_default_sdkroot_test",
+            ":disabled_exec_sdkroot_test",
+            ":disabled_explicit_sdkroot_test",
             ":fallback_sdkroot_test",
         ],
     )

@@ -17,10 +17,18 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+config_setting(
+    name = "hermetic_macos_sdkroot_enabled",
+    constraint_values = ["@platforms//os:osx"],
+    flag_values = {
+        "//rust/settings:use_hermetic_macos_sdkroot": "true",
+    },
+)
+
 alias(
     name = "default_macos_sdkroot",
     actual = select({
-        "@platforms//os:osx": "@macos_sdk//sysroot",
+        ":hermetic_macos_sdkroot_enabled": "@macos_sdk//sysroot",
         "//conditions:default": ":empty_macos_sdkroot",
     }),
     visibility = ["//visibility:public"],
