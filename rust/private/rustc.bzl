@@ -2611,20 +2611,24 @@ def _is_dylib(dep):
     """
     return not bool(dep.static_library or dep.pic_static_library)
 
-def _collect_nonstatic_linker_inputs(cc_info):
-    shared_linker_inputs = []
+def _collect_nonstatic_linker_inputs(cc_info, include_final_link_requirements):
+    nonstatic_linker_inputs = []
     for linker_input in cc_info.linking_context.linker_inputs.to_list():
         dylibs = [
             lib
             for lib in linker_input.libraries
             if _is_dylib(lib)
         ]
-        if dylibs:
-            shared_linker_inputs.append(cc_common.create_linker_input(
+        user_link_flags = linker_input.user_link_flags if include_final_link_requirements else []
+        additional_inputs = linker_input.additional_inputs if include_final_link_requirements else []
+        if dylibs or user_link_flags or additional_inputs:
+            nonstatic_linker_inputs.append(cc_common.create_linker_input(
                 owner = linker_input.owner,
                 libraries = depset(dylibs),
+                user_link_flags = depset(user_link_flags),
+                additional_inputs = depset(additional_inputs),
             ))
-    return shared_linker_inputs
+    return nonstatic_linker_inputs
 
 def _collect_dep_cc_infos(dep):
     cc_infos = []
@@ -2789,13 +2793,16 @@ def establish_cc_info(
     # Flattening is okay since crate_info.deps only records direct deps.
     for dep in crate_info.deps.to_list():
         for dep_cc_info in _collect_dep_cc_infos(dep):
-            # A Rust staticlib or shared library doesn't need to propagate linker inputs
-            # of its dependencies, except for shared libraries.
+            # Static dependencies are bundled into both crate types. Shared libraries
+            # remain final-link dependencies, as do a staticlib's user link flags.
             if crate_info.type in ["cdylib", "staticlib"]:
-                shared_linker_inputs = _collect_nonstatic_linker_inputs(dep_cc_info)
-                if shared_linker_inputs:
+                nonstatic_linker_inputs = _collect_nonstatic_linker_inputs(
+                    dep_cc_info,
+                    include_final_link_requirements = crate_info.type == "staticlib",
+                )
+                if nonstatic_linker_inputs:
                     linking_context = cc_common.create_linking_context(
-                        linker_inputs = depset(shared_linker_inputs),
+                        linker_inputs = depset(nonstatic_linker_inputs),
                     )
                     cc_infos.append(CcInfo(linking_context = linking_context))
             else:
