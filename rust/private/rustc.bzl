@@ -895,7 +895,10 @@ def collect_inputs(
     if build_env_file:
         build_env_files = list(build_env_files)
         build_env_files.append(build_env_file)
-    compile_inputs = depset(build_env_files + lint_files, transitive = [build_script_compile_inputs, compile_inputs])
+    compile_inputs = depset(
+        build_env_files + lint_files + crate_info.rustc_env_paths.values(),
+        transitive = [build_script_compile_inputs, compile_inputs],
+    )
     return compile_inputs, out_dir, build_env_files, build_flags_files, linkstamp_outs, ambiguous_libs
 
 def _will_emit_object_file(emit):
@@ -1549,6 +1552,18 @@ def construct_arguments(
 
     if hasattr(ctx.attr, "_extra_exec_rustc_env") and is_exec_configuration(ctx):
         env.update(ctx.attr._extra_exec_rustc_env[ExtraExecRustcEnvInfo].extra_exec_rustc_env)
+
+    for index, env_name in enumerate(sorted(crate_info.rustc_env_paths)):
+        if env_name in env:
+            fail("rustc_env_paths environment variable {} conflicts with another rustc environment variable".format(env_name))
+        token = "rustc_env_path_{}".format(index)
+        env[env_name] = "${{pwd}}/${{{}}}".format(token)
+        process_wrapper_flags.add_all(
+            [crate_info.rustc_env_paths[env_name]],
+            before_each = "--subst",
+            format_each = token + "=%s",
+            expand_directories = False,
+        )
 
     # Strip any `-Zallow-features=` entries out of the toolchain's extra
     # rustc flags into `all_allowed_unstable_features` and, when
@@ -2205,8 +2220,8 @@ def rustc_compile(
             )
     else:
         # Run without process_wrapper
-        if build_env_files or build_flags_files or stamp or build_metadata:
-            fail("build_env_files, build_flags_files, stamp, build_metadata are not supported when building without process_wrapper")
+        if build_env_files or build_flags_files or crate_info.rustc_env_paths or stamp or build_metadata:
+            fail("build_env_files, build_flags_files, rustc_env_paths, stamp, build_metadata are not supported when building without process_wrapper")
         ctx.actions.run(
             executable = process_wrapper,
             inputs = compile_inputs,
@@ -2448,8 +2463,13 @@ def rustc_compile(
         # ctx.configuration.default_shell_env, which must not leak through
         # CrateInfo -- it would otherwise clobber cc_toolchain link_env in
         # downstream rust_test(crate = ...) (see bazelbuild/rules_rust#3989).
+        persisted_rustc_env = {
+            name: value
+            for name, value in env_from_args.items()
+            if name not in crate_info.rustc_env_paths
+        }
         crate_info_dict.update({
-            "rustc_env": env_from_args,
+            "rustc_env": persisted_rustc_env,
         })
         crate_info = rust_common.create_crate_info(
             deps = depset(deps),
