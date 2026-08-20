@@ -202,6 +202,63 @@ panic_runtime_from_global_flags_test = analysistest.make(
     },
 )
 
+def _canonical_panic_strategy_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+
+    rustc_actions = [action for action in registered_actions if action.mnemonic == "Rustc"]
+    asserts.equals(env, 1, len(rustc_actions))
+    panic_args = [
+        arg
+        for arg in rustc_actions[0].argv
+        if arg.startswith("-Cpanic=") or arg.startswith("--codegen=panic=")
+    ]
+    asserts.true(
+        env,
+        len(panic_args) > 0 and panic_args[-1] == "-Cpanic=abort",
+        "expected canonical -Cpanic=abort after authored panic flags: {}".format(rustc_actions[0].argv),
+    )
+
+    links = [action for action in registered_actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(links))
+    cmdline = " ".join(links[0].argv)
+    asserts.true(env, "panic_abort" in cmdline, "expected panic_abort in linker invocation")
+    asserts.false(env, "panic_unwind" in cmdline, "did not expect panic_unwind in linker invocation")
+
+    return analysistest.end(env)
+
+canonical_abort_panic_strategy_test = analysistest.make(
+    _canonical_panic_strategy_test,
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+)
+
+def _rustc_owned_panic_strategy_is_unchanged_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+
+    rustc_actions = [action for action in registered_actions if action.mnemonic == "Rustc"]
+    asserts.equals(env, 1, len(rustc_actions))
+    panic_args = [
+        arg
+        for arg in rustc_actions[0].argv
+        if arg.startswith("-Cpanic=") or arg.startswith("--codegen=panic=")
+    ]
+    asserts.equals(env, ["--codegen=panic=unwind"], panic_args)
+    asserts.equals(env, 0, len([action for action in registered_actions if action.mnemonic == "CppLink"]))
+
+    return analysistest.end(env)
+
+rustc_owned_panic_strategy_is_unchanged_test = analysistest.make(
+    _rustc_owned_panic_strategy_is_unchanged_test,
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): False,
+    },
+)
+
 panic_runtime_hermetic_llvm_linux_test = analysistest.make(
     _panic_runtime_selection_test,
     attrs = {
@@ -269,6 +326,32 @@ def _cc_common_link_test_targets():
     use_cc_common_link_on_target(
         name = "panic_abort_bin_with_cc_common_link",
         target = ":panic_abort_bin",
+    )
+
+    rust_binary(
+        name = "canonical_abort_panic_bin",
+        srcs = ["panic_dependency_bin.rs"],
+        deps = [":panic_dependency"],
+        edition = "2021",
+        # The typed setting is canonical and must override this earlier option.
+        rustc_flags = ["--codegen=panic=unwind"],
+    )
+
+    with_collect_dep_actions(
+        name = "canonical_abort_panic_bin_actions",
+        target = ":canonical_abort_panic_bin",
+    )
+
+    rust_binary(
+        name = "rustc_owned_panic_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        rustc_flags = ["--codegen=panic=unwind"],
+    )
+
+    with_collect_dep_actions(
+        name = "rustc_owned_panic_bin_actions",
+        target = ":rustc_owned_panic_bin",
     )
 
     rust_binary(
@@ -399,6 +482,16 @@ def _cc_common_link_test_targets():
         unexpected_runtime = "panic_unwind",
     )
 
+    canonical_abort_panic_strategy_test(
+        name = "canonical_abort_setting_controls_codegen_and_link",
+        target_under_test = ":canonical_abort_panic_bin_actions",
+    )
+
+    rustc_owned_panic_strategy_is_unchanged_test(
+        name = "panic_setting_does_not_change_rustc_owned_link",
+        target_under_test = ":rustc_owned_panic_bin_actions",
+    )
+
     panic_runtime_hermetic_llvm_linux_test(
         name = "panic_abort_runtime_is_abort_linux_llvm",
         target_under_test = ":panic_abort_bin_with_cc_common_link",
@@ -446,6 +539,8 @@ def _cc_common_link_test_targets():
         "custom_malloc_on_binary_test",
         "default_panic_runtime_is_unwind",
         "panic_abort_runtime_is_abort",
+        "canonical_abort_setting_controls_codegen_and_link",
+        "panic_setting_does_not_change_rustc_owned_link",
         "panic_abort_runtime_is_abort_linux_llvm",
         "global_panic_abort_runtime_is_abort",
         "last_panic_codegen_option_wins",

@@ -145,6 +145,26 @@ def experimental_use_cc_common_link():
         },
     )
 
+def cc_common_link_panic_strategy():
+    """The canonical panic strategy when rules_rust delegates final linking to cc_common.link.
+
+    The setting is ignored when rustc owns the final link. Supported values are:
+    - `target-default`: use the selected Rust target's default panic strategy.
+    - `unwind`: compile and link the target Rust graph with unwinding panics.
+    - `abort`: compile and link the target Rust graph with aborting panics.
+    - `immediate-abort`: use immediate aborts; requires a matching Rust sysroot.
+    """
+    string_flag(
+        name = "cc_common_link_panic_strategy",
+        build_setting_default = "target-default",
+        values = [
+            "abort",
+            "immediate-abort",
+            "target-default",
+            "unwind",
+        ],
+    )
+
 # buildifier: disable=unnamed-macro
 def default_allocator_library():
     """A flag that determines the default allocator library for `rust_toolchain` targets."""

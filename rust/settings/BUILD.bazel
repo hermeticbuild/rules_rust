@@ -4,6 +4,7 @@ load(
     ":settings.bzl",
     "always_enable_metadata_output_groups",
     "capture_clippy_output",
+    "cc_common_link_panic_strategy",
     "clippy_error_format",
     "clippy_flag",
     "clippy_flags",
@@ -71,6 +72,8 @@ doc_extract_bzl_library(
 always_enable_metadata_output_groups()
 
 capture_clippy_output()
+
+cc_common_link_panic_strategy()
 
 clippy_flag()
 
