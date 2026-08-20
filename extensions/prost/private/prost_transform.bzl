@@ -25,6 +25,7 @@ def _rust_prost_transform_impl(ctx):
             dep_info = target[rust_common.dep_info] if rust_common.dep_info in target else None,
             cc_info = target[RustCcInfo].cc_info_without_std if RustCcInfo in target else (target[CcInfo] if CcInfo in target else None),
             build_info = None,
+            rust_cc_info = target[RustCcInfo] if RustCcInfo in target else None,
         ))
 
     # DefaultInfo is intentionally not returned here to avoid impacting other

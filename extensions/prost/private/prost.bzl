@@ -148,6 +148,13 @@ def _get_cc_info(providers):
             return provider
     fail("Couldn't find a CcInfo in the list of providers")
 
+def _get_rust_cc_info(providers):
+    """Finds the RustCcInfo provider in the list of providers."""
+    for provider in providers:
+        if hasattr(provider, "cc_info_without_std"):
+            return provider
+    return None
+
 def _compile_rust(
         *,
         ctx,
@@ -231,12 +238,14 @@ def _compile_rust(
     crate_info = _get_crate_info(providers)
     dep_info = _get_dep_info(providers)
     cc_info = _get_cc_info(providers)
+    rust_cc_info = _get_rust_cc_info(providers)
 
     return rust_common.dep_variant_info(
         crate_info = crate_info,
         dep_info = dep_info,
         cc_info = cc_info,
         build_info = None,
+        rust_cc_info = rust_cc_info,
     )
 
 def _rust_prost_aspect_impl(target, ctx):
@@ -263,6 +272,7 @@ def _rust_prost_aspect_impl(target, ctx):
                 dep_info = prost_runtime[rust_common.dep_info] if rust_common.dep_info in prost_runtime else None,
                 cc_info = prost_runtime[RustCcInfo].cc_info_without_std if RustCcInfo in prost_runtime else (prost_runtime[CcInfo] if CcInfo in prost_runtime else None),
                 build_info = None,
+                rust_cc_info = prost_runtime[RustCcInfo] if RustCcInfo in prost_runtime else None,
             ))
         if RustAnalyzerInfo in prost_runtime:
             rust_analyzer_deps.append(prost_runtime[RustAnalyzerInfo])
@@ -570,6 +580,7 @@ def _current_prost_runtime_impl(ctx):
                 dep_info = target[rust_common.dep_info] if rust_common.dep_info in target else None,
                 cc_info = target[RustCcInfo].cc_info_without_std if RustCcInfo in target else (target[CcInfo] if CcInfo in target else None),
                 build_info = None,
+                rust_cc_info = target[RustCcInfo] if RustCcInfo in target else None,
             ))
 
     return [rust_common.crate_group_info(

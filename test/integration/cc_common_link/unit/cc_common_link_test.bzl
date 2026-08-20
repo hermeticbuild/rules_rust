@@ -6,6 +6,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load(
     "@rules_rust//rust:defs.bzl",
     "rust_binary",
+    "rust_library",
     "rust_shared_library",
     "rust_test",
 )
@@ -189,24 +190,42 @@ panic_runtime_selection_test = analysistest.make(
     },
 )
 
-def _libtest_selection_test(ctx):
-    env = analysistest.begin(ctx)
-    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
-    links = [action for action in registered_actions if action.mnemonic == "CppLink"]
-    asserts.equals(env, 1, len(links))
+panic_runtime_from_global_flags_test = analysistest.make(
+    _panic_runtime_selection_test,
+    attrs = {
+        "expected_runtime": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(mandatory = True),
+    },
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+        str(Label("@rules_rust//rust/settings:extra_rustc_flags")): ["-C", "panic=abort"],
+    },
+)
 
-    cmdline = " ".join(links[0].argv)
-    asserts.equals(
-        env,
-        ctx.attr.expect_libtest,
-        "libtest" in cmdline,
-        "linker invocation should {}contain libtest".format("" if ctx.attr.expect_libtest else "not "),
-    )
+panic_runtime_hermetic_llvm_linux_test = analysistest.make(
+    _panic_runtime_selection_test,
+    attrs = {
+        "expected_runtime": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(mandatory = True),
+    },
+    config_settings = {
+        "//command_line_option:extra_toolchains": ["@llvm//toolchain:all"],
+        "//command_line_option:platforms": [str(Label("@llvm//platforms:linux_x86_64"))],
+    },
+)
+
+def _incompatible_panic_strategy_test(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.expected_error)
     return analysistest.end(env)
 
-libtest_selection_test = analysistest.make(
-    _libtest_selection_test,
-    attrs = {"expect_libtest": attr.bool()},
+incompatible_panic_strategy_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+    expect_failure = True,
 )
 
 def _cc_common_link_test_targets():
@@ -232,11 +251,19 @@ def _cc_common_link_test_targets():
         target = ":bin",
     )
 
+    rust_library(
+        name = "panic_dependency",
+        srcs = ["panic_dependency.rs"],
+        edition = "2021",
+    )
+
     rust_binary(
         name = "panic_abort_bin",
-        srcs = ["bin.rs"],
+        srcs = ["panic_dependency_bin.rs"],
+        deps = [":panic_dependency"],
         edition = "2021",
-        rustc_flags = ["-Cpanic=abort"],
+        # Cargo spells profile panic settings as this two-token rustc form.
+        rustc_flags = ["-C", "panic=abort"],
     )
 
     use_cc_common_link_on_target(
@@ -279,17 +306,37 @@ def _cc_common_link_test_targets():
         testonly = True,
     )
 
-    rust_test(
-        name = "test_with_custom_main",
+    rust_library(
+        name = "panic_abort_dependency",
+        srcs = ["panic_dependency.rs"],
+        edition = "2021",
+        rustc_flags = ["-C", "panic=abort"],
+    )
+
+    rust_binary(
+        name = "panic_unwind_bin_with_abort_dependency",
+        srcs = ["panic_dependency_bin.rs"],
+        deps = [":panic_abort_dependency"],
+        edition = "2021",
+    )
+
+    rust_binary(
+        name = "panic_immediate_abort_bin",
         srcs = ["bin.rs"],
-        edition = "2018",
-        use_libtest_harness = False,
+        edition = "2021",
+        rustc_flags = ["-C", "panic=immediate-abort"],
+    )
+
+    rust_binary(
+        name = "panic_last_codegen_option_wins_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        rustc_flags = ["-C", "panic=unwind", "--codegen=panic=abort"],
     )
 
     use_cc_common_link_on_target(
-        name = "test_with_custom_main_and_cc_common_link",
-        target = ":test_with_custom_main",
-        testonly = True,
+        name = "panic_last_codegen_option_wins_bin_with_cc_common_link",
+        target = ":panic_last_codegen_option_wins_bin",
     )
 
     rust_test(
@@ -352,20 +399,37 @@ def _cc_common_link_test_targets():
         unexpected_runtime = "panic_unwind",
     )
 
-    libtest_selection_test(
-        name = "binary_does_not_link_libtest",
+    panic_runtime_hermetic_llvm_linux_test(
+        name = "panic_abort_runtime_is_abort_linux_llvm",
+        target_under_test = ":panic_abort_bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
+    )
+
+    panic_runtime_from_global_flags_test(
+        name = "global_panic_abort_runtime_is_abort",
         target_under_test = ":bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
     )
 
-    libtest_selection_test(
-        name = "test_links_libtest",
-        target_under_test = ":test_with_cc_common_link",
-        expect_libtest = True,
+    panic_runtime_selection_test(
+        name = "last_panic_codegen_option_wins",
+        target_under_test = ":panic_last_codegen_option_wins_bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
     )
 
-    libtest_selection_test(
-        name = "test_without_harness_does_not_link_libtest",
-        target_under_test = ":test_with_custom_main_and_cc_common_link",
+    incompatible_panic_strategy_test(
+        name = "panic_unwind_rejects_abort_dependency",
+        target_under_test = ":panic_unwind_bin_with_abort_dependency",
+        expected_error = "requires panic strategy 'abort', which is incompatible with this final artifact's strategy of 'unwind'",
+    )
+
+    incompatible_panic_strategy_test(
+        name = "panic_immediate_abort_rejects_unwind_std",
+        target_under_test = ":panic_immediate_abort_bin",
+        expected_error = "panic=immediate-abort requires a standard library compiled with immediate-abort",
     )
 
     bpf_linker_ignores_cc_args_test(
@@ -382,9 +446,11 @@ def _cc_common_link_test_targets():
         "custom_malloc_on_binary_test",
         "default_panic_runtime_is_unwind",
         "panic_abort_runtime_is_abort",
-        "binary_does_not_link_libtest",
-        "test_links_libtest",
-        "test_without_harness_does_not_link_libtest",
+        "panic_abort_runtime_is_abort_linux_llvm",
+        "global_panic_abort_runtime_is_abort",
+        "last_panic_codegen_option_wins",
+        "panic_unwind_rejects_abort_dependency",
+        "panic_immediate_abort_rejects_unwind_std",
         "bpf_linker_ignores_cc_args_test",
     ]
 

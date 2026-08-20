@@ -637,6 +637,7 @@ def _rust_library_group_impl(ctx):
                 build_info = dep[BuildInfo] if BuildInfo in dep else None,
                 cc_info = dep[RustCcInfo].cc_info_without_std if RustCcInfo in dep else (dep[CcInfo] if CcInfo in dep else None),
                 crate_group_info = None,
+                rust_cc_info = dep[RustCcInfo] if RustCcInfo in dep else None,
             ))
         elif CrateGroupInfo in dep:
             dep_variant_transitive_infos.append(dep[CrateGroupInfo].dep_variant_infos)

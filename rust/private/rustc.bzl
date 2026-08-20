@@ -1778,6 +1778,54 @@ def _effective_panic_strategy(default_strategy, flag_groups):
 
     return strategy
 
+def _collect_rust_cc_infos(deps):
+    rust_cc_infos = []
+    for dep in deps:
+        crate_group = getattr(dep, "crate_group_info", None)
+        if crate_group:
+            for group_dep in crate_group.dep_variant_infos.to_list():
+                rust_cc_info = getattr(group_dep, "rust_cc_info", None)
+                if rust_cc_info:
+                    rust_cc_infos.append(rust_cc_info)
+        else:
+            rust_cc_info = getattr(dep, "rust_cc_info", None)
+            if rust_cc_info:
+                rust_cc_infos.append(rust_cc_info)
+    return rust_cc_infos
+
+def _validate_cc_common_final_panic_strategy(label, panic_strategy, dependency_panic_strategies, toolchain_default_strategy):
+    """Apply rustc's final-artifact panic-strategy compatibility checks."""
+    dependency_strategies = dependency_panic_strategies.to_list()
+    all_strategies = dependency_strategies + [panic_strategy]
+
+    if "immediate-abort" in all_strategies:
+        if toolchain_default_strategy != "immediate-abort":
+            fail((
+                "{}: panic=immediate-abort requires a standard library compiled " +
+                "with immediate-abort; the selected toolchain standard library uses '{}'."
+            ).format(label, toolchain_default_strategy))
+        incompatible = [strategy for strategy in all_strategies if strategy != "immediate-abort"]
+        if incompatible:
+            fail((
+                "{}: panic=immediate-abort requires every Rust crate in the final artifact " +
+                "to use immediate-abort; found '{}'."
+            ).format(label, incompatible[0]))
+        return
+
+    if panic_strategy == "unwind" and "abort" in dependency_strategies:
+        fail((
+            "{}: a Rust dependency requires panic strategy 'abort', which is incompatible " +
+            "with this final artifact's strategy of 'unwind'."
+        ).format(label))
+
+def _exported_cc_info_panic_strategy(panic_strategy, dependency_panic_strategies):
+    strategies = dependency_panic_strategies.to_list() + [panic_strategy]
+    if "immediate-abort" in strategies:
+        return "immediate-abort"
+    if "abort" in strategies:
+        return "abort"
+    return "unwind"
+
 def setup_zself_profile(ctx, crate_info):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
 
@@ -2074,6 +2122,19 @@ def rustc_compile(
             if rust_flags_panic_strategy not in ("unwind", "abort", "immediate-abort"):
                 fail("Unsupported rust_flags_panic_strategy '{}'".format(rust_flags_panic_strategy))
             panic_strategy = rust_flags_panic_strategy
+
+    dependency_rust_cc_infos = _collect_rust_cc_infos(deps)
+    dependency_panic_strategies = depset(transitive = [
+        info.panic_strategies
+        for info in dependency_rust_cc_infos
+    ])
+    if use_cc_common_link and not is_no_std(ctx, rust_toolchain, crate_info.is_test):
+        _validate_cc_common_final_panic_strategy(
+            ctx.label,
+            panic_strategy,
+            dependency_panic_strategies,
+            rust_toolchain.default_panic_strategy,
+        )
 
     user_manages_bootstrap = _user_manages_bootstrap(
         ctx,
@@ -2548,6 +2609,7 @@ def rustc_compile(
         interface_library,
         use_pic,
         panic_strategy,
+        dependency_panic_strategies,
         debug_context = debug_context,
         lto_object = output_o if distributed_thin_lto else None,
     )
@@ -2660,24 +2722,18 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, panic_strategy = "unwind
         libs = ctx.attr.allocator_libraries[AllocatorLibrariesInfo]
         attr_allocator_library = libs.allocator_library
         attr_global_allocator_library = libs.global_allocator_library
-    uses_libtest_harness = crate_info.is_test and getattr(ctx.attr, "use_libtest_harness", True)
-    std_prefix = "libtest" if uses_libtest_harness else "libstd"
-    allocator_map_field = std_prefix + "_and_allocator_ccinfos"
-    allocator_fallback_field = std_prefix + "_and_allocator_ccinfo"
-    global_allocator_map_field = std_prefix + "_and_global_allocator_ccinfos"
-    global_allocator_fallback_field = std_prefix + "_and_global_allocator_ccinfo"
     if is_exec_configuration(ctx):
         if attr_allocator_library:
             return _std_and_allocator_ccinfo_for_panic_strategy(
                 libs,
-                allocator_map_field,
-                allocator_fallback_field,
+                "libstd_and_allocator_ccinfos",
+                "libstd_and_allocator_ccinfo",
                 panic_strategy,
             )
         return _std_and_allocator_ccinfo_for_panic_strategy(
             toolchain,
-            allocator_map_field,
-            allocator_fallback_field,
+            "libstd_and_allocator_ccinfos",
+            "libstd_and_allocator_ccinfo",
             panic_strategy,
         )
     if toolchain._experimental_use_global_allocator:
@@ -2689,27 +2745,27 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, panic_strategy = "unwind
             if attr_global_allocator_library:
                 return _std_and_allocator_ccinfo_for_panic_strategy(
                     libs,
-                    global_allocator_map_field,
-                    global_allocator_fallback_field,
+                    "libstd_and_global_allocator_ccinfos",
+                    "libstd_and_global_allocator_ccinfo",
                     panic_strategy,
                 )
             return _std_and_allocator_ccinfo_for_panic_strategy(
                 toolchain,
-                global_allocator_map_field,
-                global_allocator_fallback_field,
+                "libstd_and_global_allocator_ccinfos",
+                "libstd_and_global_allocator_ccinfo",
                 panic_strategy,
             )
     if attr_allocator_library:
         return _std_and_allocator_ccinfo_for_panic_strategy(
             libs,
-            allocator_map_field,
-            allocator_fallback_field,
+            "libstd_and_allocator_ccinfos",
+            "libstd_and_allocator_ccinfo",
             panic_strategy,
         )
     return _std_and_allocator_ccinfo_for_panic_strategy(
         toolchain,
-        allocator_map_field,
-        allocator_fallback_field,
+        "libstd_and_allocator_ccinfos",
+        "libstd_and_allocator_ccinfo",
         panic_strategy,
     )
 
@@ -2783,6 +2839,7 @@ def establish_cc_info(
         interface_library,
         use_pic,
         panic_strategy,
+        dependency_panic_strategies,
         debug_context = None,
         lto_object = None):
     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
@@ -2797,6 +2854,7 @@ def establish_cc_info(
         interface_library (File): Optional interface library for cdylib crates on Windows.
         use_pic: (boolean): Whether the build should use PIC.
         panic_strategy (string): Effective rustc panic strategy for this crate.
+        dependency_panic_strategies (depset[String]): Panic strategies used by transitive Rust dependencies.
         debug_context (CcDebugContextInfo): The current debug context.
         lto_object (File): Optional full LLVM bitcode object for distributed ThinLTO.
 
@@ -2926,7 +2984,7 @@ def establish_cc_info(
             ctx,
             toolchain,
             crate_info,
-            panic_strategy,
+            _exported_cc_info_panic_strategy(panic_strategy, dependency_panic_strategies),
         )
         if libstd_and_allocator_cc_info:
             # TODO: if we already have an rlib in our deps, we could skip this
@@ -2934,7 +2992,13 @@ def establish_cc_info(
 
     providers = [
         cc_common.merge_cc_infos(cc_infos = cc_infos),
-        RustCcInfo(cc_info_without_std = cc_info_without_std),
+        RustCcInfo(
+            cc_info_without_std = cc_info_without_std,
+            panic_strategies = depset(
+                [panic_strategy],
+                transitive = [dependency_panic_strategies],
+            ),
+        ),
     ]
     if crate_info.type in ("staticlib", "rlib", "lib"):
         providers.append(AllocatorLibrariesImplInfo(library_to_link = library_to_link))

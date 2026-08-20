@@ -86,6 +86,13 @@ def _native_dep_test():
         deps = [":some_rlib"],
     )
 
+    rust_library(
+        name = "some_transitive_abort_rlib",
+        srcs = ["some_rlib.rs"],
+        edition = "2018",
+        deps = [":some_abort_rlib"],
+    )
+
     libstd_ordering_test(
         name = "libstd_ordering_test",
         target_under_test = ":some_rlib",
@@ -100,6 +107,12 @@ def _native_dep_test():
     libstd_panic_test(
         name = "libstd_abort_panic_test",
         target_under_test = ":some_abort_rlib",
+        expected_panic_strategy = "abort",
+    )
+
+    libstd_panic_test(
+        name = "libstd_transitive_abort_panic_test",
+        target_under_test = ":some_transitive_abort_rlib",
         expected_panic_strategy = "abort",
     )
 
@@ -123,6 +136,7 @@ def stdlib_suite(name):
             ":libstd_ordering_test",
             ":libstd_panic_test",
             ":libstd_abort_panic_test",
+            ":libstd_transitive_abort_panic_test",
             ":libstd_wasm_default_panic_test",
         ],
     )

@@ -575,6 +575,7 @@ def transform_deps(deps):
         build_info = dep[BuildInfo] if BuildInfo in dep else None,
         cc_info = dep[RustCcInfo].cc_info_without_std if RustCcInfo in dep else (dep[CcInfo] if CcInfo in dep else None),
         crate_group_info = dep[CrateGroupInfo] if CrateGroupInfo in dep else None,
+        rust_cc_info = dep[RustCcInfo] if RustCcInfo in dep else None,
     ) for dep in deps]
 
 def transform_link_deps(link_deps):
@@ -592,6 +593,7 @@ def transform_link_deps(link_deps):
         build_info = None,
         cc_info = dep[RustCcInfo].cc_info_without_std if RustCcInfo in dep else (dep[CcInfo] if CcInfo in dep else None),
         crate_group_info = None,
+        rust_cc_info = dep[RustCcInfo] if RustCcInfo in dep else None,
     ) for dep in link_deps]
 
 def should_encode_label_in_crate_name(workspace_name, label, third_party_dir):
