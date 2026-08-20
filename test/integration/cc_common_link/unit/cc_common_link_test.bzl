@@ -33,6 +33,21 @@ use_cc_common_link_transition = transition(
     implementation = _use_cc_common_link_transition_impl,
 )
 
+def _use_cc_common_abort_transition_impl(_settings, _attr):
+    return {
+        "@rules_rust//rust/settings:cc_common_link_panic_strategy": "abort",
+        "@rules_rust//rust/settings:experimental_use_cc_common_link": True,
+    }
+
+use_cc_common_abort_transition = transition(
+    inputs = [],
+    outputs = [
+        "@rules_rust//rust/settings:cc_common_link_panic_strategy",
+        "@rules_rust//rust/settings:experimental_use_cc_common_link",
+    ],
+    implementation = _use_cc_common_abort_transition_impl,
+)
+
 def _use_cc_common_link_on_target_impl(ctx):
     return [ctx.attr.target[0][DepActionsInfo], ctx.attr.target[0][OutputGroupInfo]]
 
@@ -47,6 +62,36 @@ use_cc_common_link_on_target = rule(
             default = Label("@bazel_tools//tools/allowlists/function_transition_allowlist"),
         ),
     },
+)
+
+def _run_with_cc_common_abort_impl(ctx):
+    target = ctx.attr.target[0]
+    target_executable = target[DefaultInfo].files_to_run.executable
+    executable = ctx.outputs.executable
+    ctx.actions.symlink(
+        output = executable,
+        target_file = target_executable,
+        is_executable = True,
+    )
+    return [DefaultInfo(
+        executable = executable,
+        files = depset([executable]),
+        runfiles = target[DefaultInfo].default_runfiles,
+    )]
+
+run_with_cc_common_abort_test = rule(
+    implementation = _run_with_cc_common_abort_impl,
+    attrs = {
+        "target": attr.label(
+            cfg = use_cc_common_abort_transition,
+            executable = True,
+        ),
+        "_allowlist_function_transition": attr.label(
+            default = Label("@bazel_tools//tools/allowlists/function_transition_allowlist"),
+        ),
+    },
+    executable = True,
+    test = True,
 )
 
 def _with_collect_dep_actions_impl(ctx):
@@ -190,18 +235,6 @@ panic_runtime_selection_test = analysistest.make(
     },
 )
 
-panic_runtime_from_global_flags_test = analysistest.make(
-    _panic_runtime_selection_test,
-    attrs = {
-        "expected_runtime": attr.string(mandatory = True),
-        "unexpected_runtime": attr.string(mandatory = True),
-    },
-    config_settings = {
-        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
-        str(Label("@rules_rust//rust/settings:extra_rustc_flags")): ["-C", "panic=abort"],
-    },
-)
-
 def _canonical_panic_strategy_test(ctx):
     env = analysistest.begin(ctx)
     registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
@@ -215,22 +248,47 @@ def _canonical_panic_strategy_test(ctx):
     ]
     asserts.true(
         env,
-        len(panic_args) > 0 and panic_args[-1] == "-Cpanic=abort",
-        "expected canonical -Cpanic=abort after authored panic flags: {}".format(rustc_actions[0].argv),
+        len(panic_args) > 0 and panic_args[-1] == "-Cpanic={}".format(ctx.attr.expected_strategy),
+        "expected canonical -Cpanic={} after authored panic flags: {}".format(
+            ctx.attr.expected_strategy,
+            rustc_actions[0].argv,
+        ),
     )
 
     links = [action for action in registered_actions if action.mnemonic == "CppLink"]
-    asserts.equals(env, 1, len(links))
-    cmdline = " ".join(links[0].argv)
-    asserts.true(env, "panic_abort" in cmdline, "expected panic_abort in linker invocation")
-    asserts.false(env, "panic_unwind" in cmdline, "did not expect panic_unwind in linker invocation")
+    asserts.equals(env, 1 if ctx.attr.expect_cpp_link else 0, len(links))
+    if ctx.attr.expect_cpp_link:
+        expected_runtime_args = [arg for arg in links[0].argv if ctx.attr.expected_runtime in arg]
+        unexpected_runtime_args = [arg for arg in links[0].argv if ctx.attr.unexpected_runtime in arg]
+        asserts.equals(env, 1, len(expected_runtime_args), "expected exactly one {} linker input".format(ctx.attr.expected_runtime))
+        asserts.equals(env, 0, len(unexpected_runtime_args), "did not expect {} in linker invocation".format(ctx.attr.unexpected_runtime))
 
     return analysistest.end(env)
 
 canonical_abort_panic_strategy_test = analysistest.make(
     _canonical_panic_strategy_test,
+    attrs = {
+        "expect_cpp_link": attr.bool(default = True),
+        "expected_runtime": attr.string(),
+        "expected_strategy": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(),
+    },
     config_settings = {
         str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+)
+
+canonical_unwind_panic_strategy_test = analysistest.make(
+    _canonical_panic_strategy_test,
+    attrs = {
+        "expect_cpp_link": attr.bool(default = True),
+        "expected_runtime": attr.string(),
+        "expected_strategy": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(),
+    },
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "unwind",
         str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
     },
 )
@@ -266,6 +324,8 @@ panic_runtime_hermetic_llvm_linux_test = analysistest.make(
         "unexpected_runtime": attr.string(mandatory = True),
     },
     config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
         "//command_line_option:extra_toolchains": ["@llvm//toolchain:all"],
         "//command_line_option:platforms": [str(Label("@llvm//platforms:linux_x86_64"))],
     },
@@ -276,10 +336,52 @@ def _incompatible_panic_strategy_test(ctx):
     asserts.expect_failure(env, ctx.attr.expected_error)
     return analysistest.end(env)
 
-incompatible_panic_strategy_test = analysistest.make(
+immediate_abort_requires_matching_sysroot_test = analysistest.make(
     _incompatible_panic_strategy_test,
     attrs = {"expected_error": attr.string(mandatory = True)},
     config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "immediate-abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+    expect_failure = True,
+)
+
+abort_panic_rust_test_is_unsupported_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+    expect_failure = True,
+)
+
+abort_panic_std_dylib_is_unsupported_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_link_std_dylib")): True,
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+    expect_failure = True,
+)
+
+explicit_panic_strategy_requires_global_cc_common_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): False,
+    },
+    expect_failure = True,
+)
+
+explicit_panic_strategy_rejects_rule_opt_out_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
         str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
     },
     expect_failure = True,
@@ -314,18 +416,9 @@ def _cc_common_link_test_targets():
         edition = "2021",
     )
 
-    rust_binary(
-        name = "panic_abort_bin",
-        srcs = ["panic_dependency_bin.rs"],
-        deps = [":panic_dependency"],
-        edition = "2021",
-        # Cargo spells profile panic settings as this two-token rustc form.
-        rustc_flags = ["-C", "panic=abort"],
-    )
-
-    use_cc_common_link_on_target(
-        name = "panic_abort_bin_with_cc_common_link",
-        target = ":panic_abort_bin",
+    with_collect_dep_actions(
+        name = "panic_dependency_actions",
+        target = ":panic_dependency",
     )
 
     rust_binary(
@@ -347,6 +440,20 @@ def _cc_common_link_test_targets():
         srcs = ["bin.rs"],
         edition = "2021",
         rustc_flags = ["--codegen=panic=unwind"],
+    )
+
+    rust_binary(
+        name = "parent_only_cc_common_panic_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        experimental_use_cc_common_link = 1,
+    )
+
+    rust_binary(
+        name = "cc_common_panic_opt_out_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        experimental_use_cc_common_link = 0,
     )
 
     with_collect_dep_actions(
@@ -383,43 +490,28 @@ def _cc_common_link_test_targets():
         edition = "2018",
     )
 
+    rust_binary(
+        name = "panic_abort_runtime_bin",
+        srcs = ["panic_abort_runtime.rs"],
+        edition = "2021",
+    )
+
+    run_with_cc_common_abort_test(
+        name = "panic_abort_runtime_linux",
+        target = ":panic_abort_runtime_bin",
+        target_compatible_with = ["@platforms//os:linux"],
+    )
+
     use_cc_common_link_on_target(
         name = "test_with_cc_common_link",
         target = ":test_with_srcs",
         testonly = True,
     )
 
-    rust_library(
-        name = "panic_abort_dependency",
-        srcs = ["panic_dependency.rs"],
-        edition = "2021",
-        rustc_flags = ["-C", "panic=abort"],
-    )
-
-    rust_binary(
-        name = "panic_unwind_bin_with_abort_dependency",
-        srcs = ["panic_dependency_bin.rs"],
-        deps = [":panic_abort_dependency"],
-        edition = "2021",
-    )
-
     rust_binary(
         name = "panic_immediate_abort_bin",
         srcs = ["bin.rs"],
         edition = "2021",
-        rustc_flags = ["-C", "panic=immediate-abort"],
-    )
-
-    rust_binary(
-        name = "panic_last_codegen_option_wins_bin",
-        srcs = ["bin.rs"],
-        edition = "2021",
-        rustc_flags = ["-C", "panic=unwind", "--codegen=panic=abort"],
-    )
-
-    use_cc_common_link_on_target(
-        name = "panic_last_codegen_option_wins_bin_with_cc_common_link",
-        target = ":panic_last_codegen_option_wins_bin",
     )
 
     rust_test(
@@ -475,16 +567,27 @@ def _cc_common_link_test_targets():
         unexpected_runtime = "panic_abort",
     )
 
-    panic_runtime_selection_test(
-        name = "panic_abort_runtime_is_abort",
-        target_under_test = ":panic_abort_bin_with_cc_common_link",
+    canonical_abort_panic_strategy_test(
+        name = "canonical_abort_setting_controls_codegen_and_link",
+        target_under_test = ":canonical_abort_panic_bin_actions",
         expected_runtime = "panic_abort",
+        expected_strategy = "abort",
         unexpected_runtime = "panic_unwind",
     )
 
     canonical_abort_panic_strategy_test(
-        name = "canonical_abort_setting_controls_codegen_and_link",
-        target_under_test = ":canonical_abort_panic_bin_actions",
+        name = "canonical_abort_setting_controls_rust_dependency_codegen",
+        target_under_test = ":panic_dependency_actions",
+        expect_cpp_link = False,
+        expected_strategy = "abort",
+    )
+
+    canonical_unwind_panic_strategy_test(
+        name = "canonical_unwind_setting_controls_codegen_and_link",
+        target_under_test = ":bin_with_collect_dep_actions",
+        expected_runtime = "panic_unwind",
+        expected_strategy = "unwind",
+        unexpected_runtime = "panic_abort",
     )
 
     rustc_owned_panic_strategy_is_unchanged_test(
@@ -494,35 +597,39 @@ def _cc_common_link_test_targets():
 
     panic_runtime_hermetic_llvm_linux_test(
         name = "panic_abort_runtime_is_abort_linux_llvm",
-        target_under_test = ":panic_abort_bin_with_cc_common_link",
+        target_under_test = ":canonical_abort_panic_bin_actions",
         expected_runtime = "panic_abort",
         unexpected_runtime = "panic_unwind",
     )
 
-    panic_runtime_from_global_flags_test(
-        name = "global_panic_abort_runtime_is_abort",
-        target_under_test = ":bin_with_cc_common_link",
-        expected_runtime = "panic_abort",
-        unexpected_runtime = "panic_unwind",
-    )
-
-    panic_runtime_selection_test(
-        name = "last_panic_codegen_option_wins",
-        target_under_test = ":panic_last_codegen_option_wins_bin_with_cc_common_link",
-        expected_runtime = "panic_abort",
-        unexpected_runtime = "panic_unwind",
-    )
-
-    incompatible_panic_strategy_test(
-        name = "panic_unwind_rejects_abort_dependency",
-        target_under_test = ":panic_unwind_bin_with_abort_dependency",
-        expected_error = "requires panic strategy 'abort', which is incompatible with this final artifact's strategy of 'unwind'",
-    )
-
-    incompatible_panic_strategy_test(
+    immediate_abort_requires_matching_sysroot_test(
         name = "panic_immediate_abort_rejects_unwind_std",
         target_under_test = ":panic_immediate_abort_bin",
         expected_error = "panic=immediate-abort requires a standard library compiled with immediate-abort",
+    )
+
+    abort_panic_rust_test_is_unsupported_test(
+        name = "panic_abort_rust_test_is_rejected",
+        target_under_test = ":test_with_srcs",
+        expected_error = "is unsupported for rust_test",
+    )
+
+    abort_panic_std_dylib_is_unsupported_test(
+        name = "panic_abort_std_dylib_is_rejected",
+        target_under_test = ":canonical_abort_panic_bin",
+        expected_error = "is unsupported with experimental_link_std_dylib",
+    )
+
+    explicit_panic_strategy_requires_global_cc_common_test(
+        name = "explicit_panic_strategy_requires_global_cc_common",
+        target_under_test = ":parent_only_cc_common_panic_bin",
+        expected_error = "requires --@rules_rust//rust/settings:experimental_use_cc_common_link",
+    )
+
+    explicit_panic_strategy_rejects_rule_opt_out_test(
+        name = "explicit_panic_strategy_rejects_rule_opt_out",
+        target_under_test = ":cc_common_panic_opt_out_bin",
+        expected_error = "cannot be combined with experimental_use_cc_common_link = 0",
     )
 
     bpf_linker_ignores_cc_args_test(
@@ -538,14 +645,17 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
         "default_panic_runtime_is_unwind",
-        "panic_abort_runtime_is_abort",
         "canonical_abort_setting_controls_codegen_and_link",
+        "canonical_abort_setting_controls_rust_dependency_codegen",
+        "canonical_unwind_setting_controls_codegen_and_link",
         "panic_setting_does_not_change_rustc_owned_link",
         "panic_abort_runtime_is_abort_linux_llvm",
-        "global_panic_abort_runtime_is_abort",
-        "last_panic_codegen_option_wins",
-        "panic_unwind_rejects_abort_dependency",
         "panic_immediate_abort_rejects_unwind_std",
+        "panic_abort_rust_test_is_rejected",
+        "panic_abort_std_dylib_is_rejected",
+        "explicit_panic_strategy_requires_global_cc_common",
+        "explicit_panic_strategy_rejects_rule_opt_out",
+        "panic_abort_runtime_linux",
         "bpf_linker_ignores_cc_args_test",
     ]
 

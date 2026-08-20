@@ -63,6 +63,24 @@ libstd_panic_test = analysistest.make(
     attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
 )
 
+libstd_abort_panic_test = analysistest.make(
+    _libstd_panic_test_impl,
+    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("//rust/settings:experimental_use_cc_common_link")): True,
+    },
+)
+
+libstd_disabled_cc_common_panic_setting_test = analysistest.make(
+    _libstd_panic_test_impl,
+    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("//rust/settings:experimental_use_cc_common_link")): False,
+    },
+)
+
 libstd_wasm_default_panic_test = analysistest.make(
     _libstd_panic_test_impl,
     attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
@@ -82,7 +100,6 @@ def _native_dep_test():
         name = "some_abort_rlib",
         srcs = ["some_rlib.rs"],
         edition = "2018",
-        rustc_flags = ["-Cpanic=abort"],
         deps = [":some_rlib"],
     )
 
@@ -104,13 +121,19 @@ def _native_dep_test():
         expected_panic_strategy = "unwind",
     )
 
-    libstd_panic_test(
+    libstd_disabled_cc_common_panic_setting_test(
+        name = "libstd_disabled_cc_common_panic_setting_test",
+        target_under_test = ":some_rlib",
+        expected_panic_strategy = "unwind",
+    )
+
+    libstd_abort_panic_test(
         name = "libstd_abort_panic_test",
         target_under_test = ":some_abort_rlib",
         expected_panic_strategy = "abort",
     )
 
-    libstd_panic_test(
+    libstd_abort_panic_test(
         name = "libstd_transitive_abort_panic_test",
         target_under_test = ":some_transitive_abort_rlib",
         expected_panic_strategy = "abort",
@@ -135,6 +158,7 @@ def stdlib_suite(name):
         tests = [
             ":libstd_ordering_test",
             ":libstd_panic_test",
+            ":libstd_disabled_cc_common_panic_setting_test",
             ":libstd_abort_panic_test",
             ":libstd_transitive_abort_panic_test",
             ":libstd_wasm_default_panic_test",

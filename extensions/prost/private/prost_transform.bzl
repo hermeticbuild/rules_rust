@@ -3,9 +3,6 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_common")
 
-# buildifier: disable=bzl-visibility
-load("@rules_rust//rust/private:providers.bzl", "RustCcInfo")
-
 ProstTransformInfo = provider(
     doc = "Info about transformations to apply to Prost generated source code.",
     fields = {
@@ -23,9 +20,8 @@ def _rust_prost_transform_impl(ctx):
         deps.append(rust_common.dep_variant_info(
             crate_info = target[rust_common.crate_info] if rust_common.crate_info in target else None,
             dep_info = target[rust_common.dep_info] if rust_common.dep_info in target else None,
-            cc_info = target[RustCcInfo].cc_info_without_std if RustCcInfo in target else (target[CcInfo] if CcInfo in target else None),
+            cc_info = target[CcInfo] if CcInfo in target else None,
             build_info = None,
-            rust_cc_info = target[RustCcInfo] if RustCcInfo in target else None,
         ))
 
     # DefaultInfo is intentionally not returned here to avoid impacting other

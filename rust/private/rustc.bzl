@@ -40,7 +40,6 @@ load(
     "AllocatorLibrariesInfo",
     "AlwaysEnableMetadataOutputGroupsInfo",
     "LintsInfo",
-    "RustCcInfo",
     "RustcOutputDiagnosticsInfo",
     "UnstableRustFeaturesInfo",
     _BuildInfo = "BuildInfo",
@@ -1012,7 +1011,8 @@ def construct_arguments(
         error_format = None,
         allowed_unstable_rust_features = None,
         runtime_libs = None,
-        linker_plugin_lto = False):
+        linker_plugin_lto = False,
+        canonical_panic_strategy = None):
     """Builds an Args object containing common rustc flags
 
     Args:
@@ -1086,6 +1086,8 @@ def construct_arguments(
             selected for `crate_info.type`.
         linker_plugin_lto (bool): Whether to pass `-Clinker-plugin-lto` instead
             of the `//rust/settings:lto` flags.
+        canonical_panic_strategy (str, optional): Panic strategy appended after
+            every other rustc flag source when rules_rust owns the final link.
 
     Returns:
         tuple: A tuple of the following items
@@ -1632,6 +1634,10 @@ def construct_arguments(
     all_args = [process_wrapper_flags, rustc_path, rustc_flags]
     if rust_flags_args != None:
         all_args.append(rust_flags_args)
+    if canonical_panic_strategy != None:
+        canonical_flags = ctx.actions.args()
+        canonical_flags.add("-Cpanic={}".format(canonical_panic_strategy))
+        all_args.append(canonical_flags)
 
     # Path mapping must be disabled whenever any input string carries a
     # `$(location ...)` / `$(execpath ...)` macro: location expansion
@@ -1735,96 +1741,16 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
 
     return flags
 
-def _panic_strategy_from_codegen_option(option):
-    if option.startswith("panic="):
-        strategy = option.removeprefix("panic=")
-        if strategy in ("unwind", "abort", "immediate-abort"):
-            return strategy
-    return None
-
-def _effective_panic_strategy(default_strategy, flag_groups):
-    """Resolve rustc's last-one-wins -Cpanic option from ordered flag groups."""
-    strategy = default_strategy
-    expect_codegen_option = False
-
-    for flags in flag_groups:
-        # Args values are intentionally opaque at analysis time. Callers that
-        # use them retain the default/visible flag selection; the Args value
-        # itself remains appended to rustc's command line unchanged.
-        if type(flags) == "Args":
-            expect_codegen_option = False
-            continue
-        for flag in flags:
-            if type(flag) != "string":
-                expect_codegen_option = False
-                continue
-
-            option = None
-            if expect_codegen_option:
-                option = flag
-                expect_codegen_option = False
-            elif flag in ("-C", "--codegen"):
-                expect_codegen_option = True
-                continue
-            elif flag.startswith("-C"):
-                option = flag.removeprefix("-C").removeprefix("=")
-            elif flag.startswith("--codegen="):
-                option = flag.removeprefix("--codegen=")
-
-            if option != None:
-                parsed = _panic_strategy_from_codegen_option(option)
-                if parsed != None:
-                    strategy = parsed
-
-    return strategy
-
-def _collect_rust_cc_infos(deps):
-    rust_cc_infos = []
-    for dep in deps:
-        crate_group = getattr(dep, "crate_group_info", None)
-        if crate_group:
-            for group_dep in crate_group.dep_variant_infos.to_list():
-                rust_cc_info = getattr(group_dep, "rust_cc_info", None)
-                if rust_cc_info:
-                    rust_cc_infos.append(rust_cc_info)
-        else:
-            rust_cc_info = getattr(dep, "rust_cc_info", None)
-            if rust_cc_info:
-                rust_cc_infos.append(rust_cc_info)
-    return rust_cc_infos
-
-def _validate_cc_common_final_panic_strategy(label, panic_strategy, dependency_panic_strategies, toolchain_default_strategy):
-    """Apply rustc's final-artifact panic-strategy compatibility checks."""
-    dependency_strategies = dependency_panic_strategies.to_list()
-    all_strategies = dependency_strategies + [panic_strategy]
-
-    if "immediate-abort" in all_strategies:
-        if toolchain_default_strategy != "immediate-abort":
-            fail((
-                "{}: panic=immediate-abort requires a standard library compiled " +
-                "with immediate-abort; the selected toolchain standard library uses '{}'."
-            ).format(label, toolchain_default_strategy))
-        incompatible = [strategy for strategy in all_strategies if strategy != "immediate-abort"]
-        if incompatible:
-            fail((
-                "{}: panic=immediate-abort requires every Rust crate in the final artifact " +
-                "to use immediate-abort; found '{}'."
-            ).format(label, incompatible[0]))
-        return
-
-    if panic_strategy == "unwind" and "abort" in dependency_strategies:
-        fail((
-            "{}: a Rust dependency requires panic strategy 'abort', which is incompatible " +
-            "with this final artifact's strategy of 'unwind'."
-        ).format(label))
-
-def _exported_cc_info_panic_strategy(panic_strategy, dependency_panic_strategies):
-    strategies = dependency_panic_strategies.to_list() + [panic_strategy]
-    if "immediate-abort" in strategies:
-        return "immediate-abort"
-    if "abort" in strategies:
-        return "abort"
-    return "unwind"
+def _resolved_cc_common_link_panic_strategy(toolchain):
+    strategy = toolchain._cc_common_link_panic_strategy
+    if strategy != "target-default":
+        return strategy
+    if toolchain.default_panic_strategy == "unknown":
+        fail(
+            "cc_common_link_panic_strategy=target-default cannot be resolved because " +
+            "the selected rustc cannot run on the Bazel client; set the strategy explicitly",
+        )
+    return toolchain.default_panic_strategy
 
 def setup_zself_profile(ctx, crate_info):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
@@ -1872,7 +1798,6 @@ def rustc_compile(
         rust_toolchain,
         tool_file,
         rust_flags = [],
-        rust_flags_panic_strategy = None,
         output_hash = None,
         force_all_deps_direct = False,
         crate_info_dict = None,
@@ -1897,8 +1822,6 @@ def rustc_compile(
         tool_file (File): The rustc-like executable to invoke.
         output_hash (str, optional): The hashed path of the crate root. Defaults to None.
         rust_flags (list, optional): Additional flags to pass to rustc. Defaults to [].
-        rust_flags_panic_strategy (str, optional): Final panic strategy carried by an opaque
-            Args value in rust_flags. Required for cc_common linking when rust_flags is Args.
         force_all_deps_direct (bool, optional): (deprecated) Whether to pass the transitive rlibs with --extern
             to the commandline as opposed to -L. Aspects and extensions that need this should maintain an
             explicit depset of named dependencies and pass it via `extra_named_deps` instead.
@@ -1986,6 +1909,58 @@ def rustc_compile(
     use_cc_common_link = experimental_use_cc_common_link or (
         distributed_thin_lto and crate_info.type == "bin"
     )
+    configured_panic_strategy = rust_toolchain._cc_common_link_panic_strategy
+    if configured_panic_strategy != "target-default":
+        if use_cc_common_link and not rust_toolchain._experimental_use_cc_common_link:
+            fail((
+                "{}: an explicit cc_common_link_panic_strategy requires " +
+                "--@rules_rust//rust/settings:experimental_use_cc_common_link so the " +
+                "strategy is applied to the complete Rust dependency graph"
+            ).format(ctx.label))
+        if (
+            rust_toolchain._experimental_use_cc_common_link and
+            hasattr(attr, "experimental_use_cc_common_link") and
+            attr.experimental_use_cc_common_link == 0 and
+            crate_info.type in ("bin", "cdylib")
+        ):
+            fail((
+                "{}: an explicit cc_common_link_panic_strategy cannot be combined " +
+                "with experimental_use_cc_common_link = 0"
+            ).format(ctx.label))
+
+    panic_strategy_is_canonical = (
+        not is_exec_configuration(ctx) and
+        (use_cc_common_link or rust_toolchain._experimental_use_cc_common_link)
+    )
+    default_cc_info_panic_strategy = rust_toolchain.default_panic_strategy
+    if default_cc_info_panic_strategy == "unknown":
+        default_cc_info_panic_strategy = "unwind"
+    panic_strategy = _resolved_cc_common_link_panic_strategy(rust_toolchain) if panic_strategy_is_canonical else default_cc_info_panic_strategy
+    canonical_panic_strategy = panic_strategy if panic_strategy_is_canonical else None
+    cc_info_panic_strategy = panic_strategy
+    if crate_info.is_test and canonical_panic_strategy not in (None, "unwind"):
+        fail((
+            "{}: cc_common_link_panic_strategy={} is unsupported for rust_test; " +
+            "rustc requires the unstable -Zpanic_abort_tests option for non-unwind test harnesses"
+        ).format(ctx.label, canonical_panic_strategy))
+    if (
+        canonical_panic_strategy not in (None, "unwind") and
+        rust_toolchain._experimental_link_std_dylib and
+        not is_no_std(ctx, rust_toolchain, crate_info.is_test)
+    ):
+        fail((
+            "{}: cc_common_link_panic_strategy={} is unsupported with " +
+            "experimental_link_std_dylib; the distributed std dylib uses unwind"
+        ).format(ctx.label, canonical_panic_strategy))
+    if (
+        canonical_panic_strategy == "immediate-abort" and
+        not is_no_std(ctx, rust_toolchain, crate_info.is_test) and
+        rust_toolchain.default_panic_strategy != "immediate-abort"
+    ):
+        fail((
+            "{}: panic=immediate-abort requires a standard library compiled " +
+            "with immediate-abort; the selected toolchain standard library uses '{}'."
+        ).format(ctx.label, rust_toolchain.default_panic_strategy))
 
     scan_msvc_archive_object = (
         rust_toolchain.target_abi == "msvc" and
@@ -2106,36 +2081,6 @@ def rustc_compile(
         crate_info.root,
         crate_info.type,
     )
-    panic_strategy = _effective_panic_strategy(
-        rust_toolchain.default_panic_strategy,
-        [
-            collected_extra_flags,
-            rust_flags,
-            getattr(attr, "rustc_flags", []),
-        ],
-    )
-    if type(rust_flags) == "Args":
-        needs_exported_panic_strategy = use_cc_common_link or crate_info.type in ("rlib", "lib")
-        if rust_flags_panic_strategy == None and needs_exported_panic_strategy:
-            fail("rust_flags_panic_strategy is required when opaque Args rust_flags affect a C++-linked output")
-        if rust_flags_panic_strategy != None:
-            if rust_flags_panic_strategy not in ("unwind", "abort", "immediate-abort"):
-                fail("Unsupported rust_flags_panic_strategy '{}'".format(rust_flags_panic_strategy))
-            panic_strategy = rust_flags_panic_strategy
-
-    dependency_rust_cc_infos = _collect_rust_cc_infos(deps)
-    dependency_panic_strategies = depset(transitive = [
-        info.panic_strategies
-        for info in dependency_rust_cc_infos
-    ])
-    if use_cc_common_link and not is_no_std(ctx, rust_toolchain, crate_info.is_test):
-        _validate_cc_common_final_panic_strategy(
-            ctx.label,
-            panic_strategy,
-            dependency_panic_strategies,
-            rust_toolchain.default_panic_strategy,
-        )
-
     user_manages_bootstrap = _user_manages_bootstrap(
         ctx,
         attr,
@@ -2175,6 +2120,7 @@ def rustc_compile(
         allowed_unstable_rust_features = allowed_unstable_rust_features,
         runtime_libs = runtime_libs,
         linker_plugin_lto = distributed_thin_lto,
+        canonical_panic_strategy = canonical_panic_strategy,
     )
 
     args_metadata = None
@@ -2207,6 +2153,7 @@ def rustc_compile(
             allowed_unstable_rust_features = allowed_unstable_rust_features,
             runtime_libs = runtime_libs,
             linker_plugin_lto = distributed_thin_lto,
+            canonical_panic_strategy = canonical_panic_strategy,
         )
 
     env = dict(ctx.configuration.default_shell_env)
@@ -2608,8 +2555,7 @@ def rustc_compile(
         feature_configuration,
         interface_library,
         use_pic,
-        panic_strategy,
-        dependency_panic_strategies,
+        cc_info_panic_strategy,
         debug_context = debug_context,
         lto_object = output_o if distributed_thin_lto else None,
     )
@@ -2649,7 +2595,6 @@ def rustc_compile_action(
         attr,
         toolchain,
         rust_flags = [],
-        rust_flags_panic_strategy = None,
         output_hash = None,
         force_all_deps_direct = False,
         crate_info_dict = None,
@@ -2663,7 +2608,6 @@ def rustc_compile_action(
         rust_toolchain = toolchain,
         tool_file = toolchain.rustc,
         rust_flags = rust_flags,
-        rust_flags_panic_strategy = rust_flags_panic_strategy,
         output_hash = output_hash,
         force_all_deps_direct = force_all_deps_direct,
         crate_info_dict = crate_info_dict,
@@ -2839,7 +2783,6 @@ def establish_cc_info(
         interface_library,
         use_pic,
         panic_strategy,
-        dependency_panic_strategies,
         debug_context = None,
         lto_object = None):
     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
@@ -2853,8 +2796,7 @@ def establish_cc_info(
         feature_configuration (FeatureConfiguration): Feature configuration to be queried.
         interface_library (File): Optional interface library for cdylib crates on Windows.
         use_pic: (boolean): Whether the build should use PIC.
-        panic_strategy (string): Effective rustc panic strategy for this crate.
-        dependency_panic_strategies (depset[String]): Panic strategies used by transitive Rust dependencies.
+        panic_strategy (string): Panic strategy selected for exported native linkage.
         debug_context (CcDebugContextInfo): The current debug context.
         lto_object (File): Optional full LLVM bitcode object for distributed ThinLTO.
 
@@ -2974,32 +2916,18 @@ def establish_cc_info(
             else:
                 cc_infos.append(dep_cc_info)
 
-    cc_info_without_std = cc_common.merge_cc_infos(cc_infos = cc_infos)
     if crate_info.type in ("rlib", "lib"):
-        # A direct C++ consumer has no rustc-owned final link to repair a
-        # mismatched runtime, so this public closure must match the crate's
-        # effective strategy. C++ consumers must not directly merge Rust
-        # rlibs compiled with different panic strategies.
         libstd_and_allocator_cc_info = _get_std_and_alloc_info(
             ctx,
             toolchain,
             crate_info,
-            _exported_cc_info_panic_strategy(panic_strategy, dependency_panic_strategies),
+            panic_strategy,
         )
         if libstd_and_allocator_cc_info:
             # TODO: if we already have an rlib in our deps, we could skip this
             cc_infos.append(libstd_and_allocator_cc_info)
 
-    providers = [
-        cc_common.merge_cc_infos(cc_infos = cc_infos),
-        RustCcInfo(
-            cc_info_without_std = cc_info_without_std,
-            panic_strategies = depset(
-                [panic_strategy],
-                transitive = [dependency_panic_strategies],
-            ),
-        ),
-    ]
+    providers = [cc_common.merge_cc_infos(cc_infos = cc_infos)]
     if crate_info.type in ("staticlib", "rlib", "lib"):
         providers.append(AllocatorLibrariesImplInfo(library_to_link = library_to_link))
     return providers

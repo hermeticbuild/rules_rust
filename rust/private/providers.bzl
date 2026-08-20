@@ -104,7 +104,6 @@ DepVariantInfo = provider(
         "crate_group_info": "CrateGroupInfo: The CrateGroupInfo of a Rust crate group dependency",
         "crate_info": "CrateInfo: The CrateInfo of a Rust dependency",
         "dep_info": "DepInfo: The DepInfo of a Rust dependency",
-        "rust_cc_info": "RustCcInfo: internal C++ linkage and panic-strategy information for a Rust dependency",
     },
 )
 
@@ -233,14 +232,6 @@ AllocatorLibrariesImplInfo = provider(
     doc = "AllocatorLibrariesImplInfo provides the Rust-generated allocator LibraryToLink.",
     fields = {
         "library_to_link": "Optional[LibraryToLink]: the allocator library and its LTO metadata.",
-    },
-)
-
-RustCcInfo = provider(
-    doc = "Internal CcInfo for Rust-to-Rust propagation, before adding the final std/allocator closure.",
-    fields = {
-        "cc_info_without_std": "CcInfo: Rust crate and native dependency linkage without std/allocator inputs",
-        "panic_strategies": "depset[String]: effective panic strategies of this crate and its transitive Rust dependencies",
     },
 )
 

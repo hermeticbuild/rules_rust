@@ -113,34 +113,88 @@ The appropriate implementation layer is therefore the rules_rust code that:
 
 ## Implemented approach
 
-The candidate implementation:
+The implementation uses a narrower, explicit contract:
 
-- resolves the effective strategy from the target default and ordered Rust flag sources;
-- supports Cargo's two-token `-C`, `panic=abort` spelling and rustc's compact/equivalent forms;
-- preserves rustc's last-option-wins behavior;
-- constructs distinct standard-library/allocator closures for unwind, abort, and immediate-abort;
-- supplies only the selected closure to the Bazel-owned final link;
-- propagates std-free Rust `CcInfo` internally so an intermediate rlib does not prematurely attach a final runtime;
-- propagates representable transitive panic-strategy requirements;
-- rejects an unwind final artifact with an abort-required dependency; and
-- rejects `immediate-abort` when the selected precompiled standard library was not built for it.
+- `cc_common_link_panic_strategy` declares `target-default`, `unwind`, `abort`,
+  or `immediate-abort` for configurations using `experimental_use_cc_common_link`;
+- generated toolchains query the selected rustc's `panic="..."` target cfg rather
+  than maintaining a target list;
+- when repository evaluation cannot execute a compiler selected for a remote
+  platform, the toolchain records `unknown`: `target-default` then fails closed
+  for cc-common linking and asks for an explicit strategy;
+- the selected strategy is appended to rustc as a final canonical
+  `-Cpanic=<strategy>` argument, after authored and opaque argument sources;
+- the same value selects the standard-library/allocator `CcInfo` closure for the
+  final `cc_common.link` action and every target-configuration Rust library;
+- normal rustc-owned final links are unchanged when cc-common linking is disabled;
+- explicit strategy selection requires configuration-wide cc-common linking so
+  dependencies cannot silently use another intent;
+- `immediate-abort` fails during analysis unless the sysroot has the matching
+  default strategy; and
+- non-unwind `rust_test` fails during analysis because stable rustc requires the
+  unsupported `-Zpanic_abort_tests` option for such test harnesses.
 
-Unrelated libtest behavior is intentionally unchanged and should be handled separately.
+The implementation intentionally does not parse arbitrary rustc flags or emulate
+metadata-only per-crate compatibility requirements.
 
 ## Focused test results
 
 The following focused tests pass after the change:
 
 ```text
-//unit:default_panic_runtime_is_unwind              PASSED
-//unit:panic_abort_runtime_is_abort                 PASSED
-//unit:global_panic_abort_runtime_is_abort          PASSED
-//unit:last_panic_codegen_option_wins               PASSED
-//unit:panic_unwind_rejects_abort_dependency        PASSED
-//unit:panic_immediate_abort_rejects_unwind_std     PASSED
+//unit:default_panic_runtime_is_unwind                           PASSED
+//unit:canonical_abort_setting_controls_codegen_and_link         PASSED
+//unit:canonical_abort_setting_controls_rust_dependency_codegen  PASSED
+//unit:canonical_unwind_setting_controls_codegen_and_link        PASSED
+//unit:panic_setting_does_not_change_rustc_owned_link            PASSED
+//unit:panic_immediate_abort_rejects_unwind_std                  PASSED
+//unit:panic_abort_rust_test_is_rejected                         PASSED
+//unit:panic_abort_std_dylib_is_rejected                         PASSED
+//unit:explicit_panic_strategy_requires_global_cc_common         PASSED
+//unit:explicit_panic_strategy_rejects_rule_opt_out              PASSED
 ```
 
-A Linux hermetic-LLVM regression is included as `//unit:panic_abort_runtime_is_abort_linux_llvm`. Local execution is not yet proven: an initial GitHub DNS failure was followed by a remote-downloader retry that failed while extracting the Rust toolchain because the host filesystem ran out of space. No source assertion failed during those attempts.
+A Linux hermetic-LLVM analysis regression passes as
+`//unit:panic_abort_runtime_is_abort_linux_llvm`. A Linux-only runtime target,
+`//unit:panic_abort_runtime_linux`, launches a child that panics and requires the
+child to terminate with `SIGABRT`.
+
+On a macOS host, the runtime binary cross-builds successfully as an x86-64 Linux
+ELF. Its Rust action ends in `-Cpanic=abort`; its `CppLink` action contains
+`libpanic_abort` and excludes `libpanic_unwind`.
+
+The Linux runtime test also passes under remote execution with the hermetic LLVM
+toolchain. The test launches itself as a child, panics in the child, and observes
+Linux signal 6 (`SIGABRT`) in the parent. BuildBuddy's default worker image was
+too old for the hermetic process wrapper; the passing invocation therefore used
+`--remote_default_exec_properties=container-image=docker://ubuntu:22.04`.
+
+```text
+bazel test --config=remote \
+  --remote_executor=grpcs://remote.buildbuddy.io \
+  --remote_default_exec_properties=container-image=docker://ubuntu:22.04 \
+  --extra_execution_platforms=@llvm//platforms:linux_x86_64 \
+  --extra_toolchains=@llvm//toolchain:all \
+  --platforms=@llvm//platforms:linux_x86_64 \
+  --@rules_rust//rust/settings:experimental_use_cc_common_link \
+  --@rules_rust//rust/settings:cc_common_link_panic_strategy=abort \
+  //unit:panic_abort_runtime_linux
+```
+
+Result: one test executed and passed. The downloaded output is an x86-64 Linux
+ELF, and `llvm readelf -h` reports `ELF64` / `Advanced Micro Devices X86-64`.
+
+For the same remote Linux platform, omitting an explicit strategy while retaining
+`target-default` fails during analysis with:
+
+```text
+cc_common_link_panic_strategy=target-default cannot be resolved because the
+selected rustc cannot run on the Bazel client; set the strategy explicitly
+```
+
+This negative result is intentional: repository rules execute on the macOS Bazel
+client, where the selected Linux rustc cannot run. Guessing a target default
+would violate the exact-toolchain contract.
 
 ## Remaining architectural limitations
 
@@ -154,7 +208,7 @@ These are existing architectural gaps. Fixing them would require a broader desig
 
 The current justification is consequently narrower and precise: rules_rust must not unconditionally select `panic_unwind` when it owns the final link for a crate whose effective configured strategy is abort, and it must reproduce the final-link checks that are representable in Bazel analysis.
 
-## Proposed simplification: a cc-common-link-owned panic intent
+## Implemented simplification: a cc-common-link-owned panic intent
 
 ### Correctness boundary
 
@@ -183,7 +237,9 @@ Candidate setting:
 
 The setting has no effect on a normal rustc-owned final link. `target-default`
 must resolve from the exact selected Rust toolchain/target, not a hand-maintained
-target list. Explicit strategies express user intent directly.
+target list. If the selected compiler cannot run during repository evaluation,
+`target-default` fails closed for cc-common linking. Explicit strategies express
+user intent directly and remain usable for that remote-platform case.
 
 ### Why this can remove current machinery
 
@@ -257,7 +313,7 @@ a concrete use case justifies the provider and validation machinery.
 8. A hermetic-LLVM Linux test inspects the final ELF/link action and runs a small
    binary as supplementary behavioral evidence.
 
-### Implementation plan
+### Implementation plan used
 
 1. Add the typed setting and document its supported scope in the setting's own
    help text.
@@ -275,8 +331,6 @@ a concrete use case justifies the provider and validation machinery.
 7. Add the Linux hermetic-LLVM action/artifact/runtime coverage and compare the
    observable result with an equivalent rustc-owned link.
 
-Before implementation, decide whether rule-level `experimental_use_cc_common_link`
-overrides are part of the supported setting propagation model. If dependencies
-cannot observe that parent-only choice, either make the panic setting independently
-configuration-wide for all Rust libraries or reject parent-only enablement for
-this mode.
+The implementation requires explicit strategies to be paired with the
+configuration-wide `experimental_use_cc_common_link` setting. A parent-only
+rule override is rejected because its dependencies cannot observe that choice.
