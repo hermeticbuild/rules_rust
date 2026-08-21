@@ -62,8 +62,7 @@ def make_libstd_and_allocator_ccinfo(
           * a cc_info field of type CcInfo
           * an allocator_libraries_impl_info field, which should be None or of type AllocatorLibrariesImplInfo.
         std: Standard library flavor. Currently "std" and "no_std_with_alloc" are supported.
-        panic_strategy: Panic runtime to include for std builds. One of "unwind", "abort", or
-            "immediate-abort".
+        panic_strategy: Panic runtime to include for std builds. One of "unwind" or "abort".
 
 
     Returns:
@@ -132,7 +131,7 @@ def make_libstd_and_allocator_ccinfo(
             order = "topological",
         )
 
-        if panic_strategy not in ("unwind", "abort", "immediate-abort"):
+        if panic_strategy not in ("unwind", "abort"):
             fail("Unsupported panic strategy '{}'".format(panic_strategy))
         if experimental_link_std_dylib and panic_strategy != "unwind":
             # The distributed std dylib is built for the target's unwind
@@ -142,7 +141,7 @@ def make_libstd_and_allocator_ccinfo(
 
         # rustc injects exactly one panic runtime according to the effective
         # -Cpanic strategy. Match that selection when a C++ linker owns the
-        # final link. immediate-abort does not use a panic runtime.
+        # final link.
         filtered_between_core_and_std_files = rust_stdlib_info.between_core_and_std_files
         if panic_strategy == "unwind":
             filtered_between_core_and_std_files = [
@@ -150,17 +149,11 @@ def make_libstd_and_allocator_ccinfo(
                 for f in filtered_between_core_and_std_files
                 if "panic_abort" not in f.basename
             ]
-        elif panic_strategy == "abort":
-            filtered_between_core_and_std_files = [
-                f
-                for f in filtered_between_core_and_std_files
-                if "unwind" not in f.basename
-            ]
         else:
             filtered_between_core_and_std_files = [
                 f
                 for f in filtered_between_core_and_std_files
-                if "panic_abort" not in f.basename and "unwind" not in f.basename
+                if "unwind" not in f.basename
             ]
 
         # no_std + alloc currently uses the aborting panic closure regardless
@@ -272,28 +265,20 @@ def _rust_allocator_libraries_impl(ctx):
 
     toolchain = find_toolchain(ctx)
 
-    def make_cc_info(info, std, panic_strategy = "unwind"):
+    def make_cc_info(info, std):
         return toolchain.make_libstd_and_allocator_ccinfo(
             ctx.label,
             ctx.actions,
             struct(allocator_libraries_impl_info = info),
             std,
-            panic_strategy,
+            toolchain._cc_info_panic_strategy,
         )
-
-    def make_cc_infos(info, std):
-        return {
-            panic_strategy: make_cc_info(info, std, panic_strategy)
-            for panic_strategy in ("unwind", "abort", "immediate-abort")
-        }
 
     providers = [AllocatorLibrariesInfo(
         allocator_library = allocator_library,
         global_allocator_library = global_allocator_library,
         libstd_and_allocator_ccinfo = make_cc_info(allocator_library, "std"),
-        libstd_and_allocator_ccinfos = make_cc_infos(allocator_library, "std"),
         libstd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std"),
-        libstd_and_global_allocator_ccinfos = make_cc_infos(global_allocator_library, "std"),
         nostd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "no_std_with_alloc"),
     )]
 

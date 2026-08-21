@@ -235,14 +235,6 @@ def _panic_runtime_selection_test(ctx):
     )
     return analysistest.end(env)
 
-panic_runtime_selection_test = analysistest.make(
-    _panic_runtime_selection_test,
-    attrs = {
-        "expected_runtime": attr.string(mandatory = True),
-        "unexpected_runtime": attr.string(mandatory = True),
-    },
-)
-
 def _canonical_panic_strategy_test(ctx):
     env = analysistest.begin(ctx)
     registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
@@ -587,12 +579,6 @@ def _cc_common_link_test_targets():
         testonly = True,
     )
 
-    rust_binary(
-        name = "panic_immediate_abort_bin",
-        srcs = ["bin.rs"],
-        edition = "2021",
-    )
-
     rust_test(
         name = "test-with-crate",
         crate = "cdylib",
@@ -637,13 +623,6 @@ def _cc_common_link_test_targets():
     custom_malloc_test(
         name = "custom_malloc_on_binary_test",
         target_under_test = ":bin_with_cc_common_link",
-    )
-
-    panic_runtime_selection_test(
-        name = "default_panic_runtime_is_unwind",
-        target_under_test = ":bin_with_cc_common_link",
-        expected_runtime = "panic_unwind",
-        unexpected_runtime = "panic_abort",
     )
 
     canonical_abort_panic_strategy_test(
@@ -741,7 +720,6 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_crate_test",
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
-        "default_panic_runtime_is_unwind",
         "canonical_abort_setting_controls_codegen_and_link",
         "canonical_abort_setting_controls_rust_dependency_codegen",
         "canonical_abort_setting_controls_rustc_owned_staticlib",

@@ -1741,17 +1741,6 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
 
     return flags
 
-def _resolved_cc_common_link_panic_strategy(toolchain):
-    strategy = toolchain._cc_common_link_panic_strategy
-    if strategy != "target-default":
-        return strategy
-    if toolchain.default_panic_strategy == "unknown":
-        fail(
-            "cc_common_link_panic_strategy=target-default cannot be resolved because " +
-            "the selected rustc cannot run on the Bazel client; set the strategy explicitly",
-        )
-    return toolchain.default_panic_strategy
-
 def setup_zself_profile(ctx, crate_info):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
 
@@ -1910,12 +1899,24 @@ def rustc_compile(
         distributed_thin_lto and crate_info.type == "bin"
     )
     configured_panic_strategy = rust_toolchain._cc_common_link_panic_strategy
-    if configured_panic_strategy != "target-default":
-        if use_cc_common_link and not rust_toolchain._experimental_use_cc_common_link:
+    is_exec = is_exec_configuration(ctx)
+    if not is_exec:
+        if rust_toolchain._experimental_use_cc_common_link and configured_panic_strategy == "unset":
             fail((
-                "{}: an explicit cc_common_link_panic_strategy requires " +
-                "--@rules_rust//rust/settings:experimental_use_cc_common_link so the " +
-                "strategy is applied to the complete Rust dependency graph"
+                "{}: configuration-wide cc_common.link requires " +
+                "cc_common_link_panic_strategy=unwind or abort"
+            ).format(ctx.label))
+        if use_cc_common_link and not rust_toolchain._experimental_use_cc_common_link:
+            if distributed_thin_lto:
+                fail((
+                    "{}: distributed ThinLTO requires global cc-common linking and " +
+                    "cc_common_link_panic_strategy=unwind or abort"
+                ).format(ctx.label))
+            fail((
+                "{}: cc_common.link requires " +
+                "--@rules_rust//rust/settings:experimental_use_cc_common_link and " +
+                "cc_common_link_panic_strategy=unwind or abort so the strategy is " +
+                "applied to the complete Rust dependency graph"
             ).format(ctx.label))
         if (
             rust_toolchain._experimental_use_cc_common_link and
@@ -1924,27 +1925,29 @@ def rustc_compile(
             crate_info.type in ("bin", "cdylib")
         ):
             fail((
-                "{}: an explicit cc_common_link_panic_strategy cannot be combined " +
+                "{}: configuration-wide cc_common_link_panic_strategy cannot be combined " +
                 "with experimental_use_cc_common_link = 0"
             ).format(ctx.label))
 
-    panic_strategy_is_canonical = (
-        not is_exec_configuration(ctx) and
-        (use_cc_common_link or rust_toolchain._experimental_use_cc_common_link)
-    )
-    default_cc_info_panic_strategy = rust_toolchain.default_panic_strategy
-    if default_cc_info_panic_strategy == "unknown":
-        default_cc_info_panic_strategy = "unwind"
-    panic_strategy = _resolved_cc_common_link_panic_strategy(rust_toolchain) if panic_strategy_is_canonical else default_cc_info_panic_strategy
-    canonical_panic_strategy = panic_strategy if panic_strategy_is_canonical else None
-    cc_info_panic_strategy = panic_strategy
+    canonical_panic_strategy = configured_panic_strategy if (
+        not is_exec and
+        rust_toolchain._experimental_use_cc_common_link and
+        configured_panic_strategy != "unset"
+    ) else None
     if crate_info.is_test and canonical_panic_strategy not in (None, "unwind"):
         fail((
             "{}: cc_common_link_panic_strategy={} is unsupported for rust_test; " +
             "rustc requires the unstable -Zpanic_abort_tests option for non-unwind test harnesses"
         ).format(ctx.label, canonical_panic_strategy))
     if (
-        canonical_panic_strategy not in (None, "unwind") and
+        canonical_panic_strategy != None and
+        is_no_std(ctx, rust_toolchain, crate_info.is_test)
+    ):
+        fail((
+            "{}: cc_common_link_panic_strategy={} is unsupported with no_std"
+        ).format(ctx.label, canonical_panic_strategy))
+    if (
+        canonical_panic_strategy == "abort" and
         rust_toolchain._experimental_link_std_dylib and
         not is_no_std(ctx, rust_toolchain, crate_info.is_test)
     ):
@@ -1952,15 +1955,6 @@ def rustc_compile(
             "{}: cc_common_link_panic_strategy={} is unsupported with " +
             "experimental_link_std_dylib; the distributed std dylib uses unwind"
         ).format(ctx.label, canonical_panic_strategy))
-    if (
-        canonical_panic_strategy == "immediate-abort" and
-        not is_no_std(ctx, rust_toolchain, crate_info.is_test) and
-        rust_toolchain.default_panic_strategy != "immediate-abort"
-    ):
-        fail((
-            "{}: panic=immediate-abort requires a standard library compiled " +
-            "with immediate-abort; the selected toolchain standard library uses '{}'."
-        ).format(ctx.label, rust_toolchain.default_panic_strategy))
 
     scan_msvc_archive_object = (
         rust_toolchain.target_abi == "msvc" and
@@ -2319,12 +2313,7 @@ def rustc_compile(
         # Collect the CcInfo values of the standard library and dependencies.
         dependency_cc_infos = [
             malloc_library[CcInfo],
-            _get_std_and_alloc_info(
-                ctx,
-                rust_toolchain,
-                crate_info,
-                panic_strategy,
-            ),
+            _get_std_and_alloc_info(ctx, rust_toolchain, crate_info),
             rust_toolchain.stdlib_linkflags,
         ]
         linking_contexts = [cc_info.linking_context for cc_info in dependency_cc_infos]
@@ -2555,7 +2544,6 @@ def rustc_compile(
         feature_configuration,
         interface_library,
         use_pic,
-        cc_info_panic_strategy,
         debug_context = debug_context,
         lto_object = output_o if distributed_thin_lto else None,
     )
@@ -2636,17 +2624,7 @@ def _should_use_rustc_allocator_libraries(toolchain):
         return toolchain._experimental_use_allocator_libraries_with_mangled_symbols_setting
     return bool(use_or_default)
 
-def _std_and_allocator_ccinfo_for_panic_strategy(info, map_field, fallback_field, panic_strategy):
-    cc_infos = getattr(info, map_field, None)
-    if cc_infos != None:
-        selected = cc_infos.get(panic_strategy)
-        if selected != None:
-            return selected
-    if panic_strategy == "unwind":
-        return getattr(info, fallback_field)
-    fail("No std/allocator CcInfo is available for panic strategy '{}'".format(panic_strategy))
-
-def _get_std_and_alloc_info(ctx, toolchain, crate_info, panic_strategy = "unwind"):
+def _get_std_and_alloc_info(ctx, toolchain, crate_info):
     # Handles standard libraries and allocator shims.
     #
     # The standard libraries vary between "std" and "nostd" flavors.
@@ -2668,18 +2646,8 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, panic_strategy = "unwind
         attr_global_allocator_library = libs.global_allocator_library
     if is_exec_configuration(ctx):
         if attr_allocator_library:
-            return _std_and_allocator_ccinfo_for_panic_strategy(
-                libs,
-                "libstd_and_allocator_ccinfos",
-                "libstd_and_allocator_ccinfo",
-                panic_strategy,
-            )
-        return _std_and_allocator_ccinfo_for_panic_strategy(
-            toolchain,
-            "libstd_and_allocator_ccinfos",
-            "libstd_and_allocator_ccinfo",
-            panic_strategy,
-        )
+            return libs.libstd_and_allocator_ccinfo
+        return toolchain.libstd_and_allocator_ccinfo
     if toolchain._experimental_use_global_allocator:
         if is_no_std(ctx, toolchain, crate_info.is_test):
             if attr_global_allocator_library:
@@ -2687,31 +2655,11 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, panic_strategy = "unwind
             return toolchain.nostd_and_global_allocator_ccinfo
         else:
             if attr_global_allocator_library:
-                return _std_and_allocator_ccinfo_for_panic_strategy(
-                    libs,
-                    "libstd_and_global_allocator_ccinfos",
-                    "libstd_and_global_allocator_ccinfo",
-                    panic_strategy,
-                )
-            return _std_and_allocator_ccinfo_for_panic_strategy(
-                toolchain,
-                "libstd_and_global_allocator_ccinfos",
-                "libstd_and_global_allocator_ccinfo",
-                panic_strategy,
-            )
+                return libs.libstd_and_global_allocator_ccinfo
+            return toolchain.libstd_and_global_allocator_ccinfo
     if attr_allocator_library:
-        return _std_and_allocator_ccinfo_for_panic_strategy(
-            libs,
-            "libstd_and_allocator_ccinfos",
-            "libstd_and_allocator_ccinfo",
-            panic_strategy,
-        )
-    return _std_and_allocator_ccinfo_for_panic_strategy(
-        toolchain,
-        "libstd_and_allocator_ccinfos",
-        "libstd_and_allocator_ccinfo",
-        panic_strategy,
-    )
+        return libs.libstd_and_allocator_ccinfo
+    return toolchain.libstd_and_allocator_ccinfo
 
 def _is_dylib(dep):
     """Determine if the dependency represents a dynamic library.
@@ -2782,7 +2730,6 @@ def establish_cc_info(
         feature_configuration,
         interface_library,
         use_pic,
-        panic_strategy,
         debug_context = None,
         lto_object = None):
     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
@@ -2796,7 +2743,6 @@ def establish_cc_info(
         feature_configuration (FeatureConfiguration): Feature configuration to be queried.
         interface_library (File): Optional interface library for cdylib crates on Windows.
         use_pic: (boolean): Whether the build should use PIC.
-        panic_strategy (string): Panic strategy selected for exported native linkage.
         debug_context (CcDebugContextInfo): The current debug context.
         lto_object (File): Optional full LLVM bitcode object for distributed ThinLTO.
 
@@ -2917,12 +2863,7 @@ def establish_cc_info(
                 cc_infos.append(dep_cc_info)
 
     if crate_info.type in ("rlib", "lib"):
-        libstd_and_allocator_cc_info = _get_std_and_alloc_info(
-            ctx,
-            toolchain,
-            crate_info,
-            panic_strategy,
-        )
+        libstd_and_allocator_cc_info = _get_std_and_alloc_info(ctx, toolchain, crate_info)
         if libstd_and_allocator_cc_info:
             # TODO: if we already have an rlib in our deps, we could skip this
             cc_infos.append(libstd_and_allocator_cc_info)

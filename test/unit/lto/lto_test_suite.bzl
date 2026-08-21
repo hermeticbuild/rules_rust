@@ -22,9 +22,13 @@ _LLVM_LINUX_CONFIG_SETTINGS = {
     "//command_line_option:extra_toolchains": ["@llvm//toolchain:all"],
     "//command_line_option:platforms": [str(Label("@llvm//platforms:linux_x86_64"))],
 }
-_DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
+_DISTRIBUTED_THIN_LTO_WITHOUT_PANIC_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
     _ALLOCATOR_LIBRARIES_SETTING: True,
     "//command_line_option:features": ["thin_lto"],
+}
+_DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS = _DISTRIBUTED_THIN_LTO_WITHOUT_PANIC_CONFIG_SETTINGS | {
+    _CC_COMMON_LINK_PANIC_SETTING: "unwind",
+    _CC_COMMON_LINK_SETTING: True,
 }
 _RULE_FEATURE_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
     _ALLOCATOR_LIBRARIES_SETTING: True,
@@ -259,7 +263,7 @@ def _distributed_thin_lto_requires_explicit_panic_strategy(ctx):
 _distributed_thin_lto_requires_explicit_panic_strategy_test = analysistest.make(
     _distributed_thin_lto_requires_explicit_panic_strategy,
     expect_failure = True,
-    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS,
+    config_settings = _DISTRIBUTED_THIN_LTO_WITHOUT_PANIC_CONFIG_SETTINGS,
 )
 
 _thin_lto_feature_overrides_manual_lto_setting_test = analysistest.make(

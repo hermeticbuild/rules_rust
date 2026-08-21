@@ -81,14 +81,6 @@ libstd_disabled_cc_common_panic_setting_test = analysistest.make(
     },
 )
 
-libstd_wasm_default_panic_test = analysistest.make(
-    _libstd_panic_test_impl,
-    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
-    config_settings = {
-        "//command_line_option:platforms": [str(Label("//rust/platform:wasm32"))],
-    },
-)
-
 def _native_dep_test():
     rust_library(
         name = "some_rlib",
@@ -139,12 +131,6 @@ def _native_dep_test():
         expected_panic_strategy = "abort",
     )
 
-    libstd_wasm_default_panic_test(
-        name = "libstd_wasm_default_panic_test",
-        target_under_test = ":some_rlib",
-        expected_panic_strategy = "abort",
-    )
-
 def stdlib_suite(name):
     """Entry-point macro called from the BUILD file.
 
@@ -161,6 +147,5 @@ def stdlib_suite(name):
             ":libstd_disabled_cc_common_panic_setting_test",
             ":libstd_abort_panic_test",
             ":libstd_transitive_abort_panic_test",
-            ":libstd_wasm_default_panic_test",
         ],
     )

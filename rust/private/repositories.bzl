@@ -2,7 +2,7 @@
 
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 load("//rust/platform:triple.bzl", "get_host_triple", "triple")
-load("//rust/platform:triple_mappings.bzl", "system_to_binary_ext", "triple_to_constraint_set")
+load("//rust/platform:triple_mappings.bzl", "triple_to_constraint_set")
 load("//rust/private:common.bzl", "rust_common")
 load("//rust/private:nightly_versions.bzl", "NIGHTLY_VERSION_TRANSITIONS")
 load(
@@ -50,28 +50,6 @@ _RUST_TOOLCHAIN_VERSIONS = [
     rust_common.default_version,
     DEFAULT_NIGHTLY_VERSION,
 ]
-
-def _query_default_panic_strategy(ctx, exec_triple, target_triple):
-    rustc = ctx.path("bin/rustc{}".format(system_to_binary_ext(exec_triple.system)))
-    result = ctx.execute(
-        [rustc, "--print", "cfg", "--target", target_triple.str],
-        quiet = True,
-    )
-    if result.return_code:
-        # Repository rules execute on the Bazel client. A compiler selected
-        # for a remote execution platform may not be runnable there. Preserve
-        # that uncertainty so target-default can fail closed during analysis,
-        # while explicit panic strategies remain usable.
-        return "unknown"
-
-    panic_cfgs = [
-        line
-        for line in result.stdout.splitlines()
-        if line.startswith('panic="') and line.endswith('"')
-    ]
-    if len(panic_cfgs) != 1:
-        return "unknown"
-    return panic_cfgs[0][len('panic="'):-1]
 
 def rust_register_toolchains(
         *,
@@ -477,7 +455,6 @@ def _rust_toolchain_tools_repository_impl(ctx):
         sha256s.update(llvm_tools_sha256)
 
     target_triple = triple(ctx.attr.target_triple)
-    default_panic_strategy = _query_default_panic_strategy(ctx, exec_triple, target_triple)
     rust_stdlib_content, rust_stdlib_sha256 = load_rust_stdlib(
         ctx = ctx,
         target_triple = target_triple,
@@ -499,7 +476,6 @@ def _rust_toolchain_tools_repository_impl(ctx):
         target_triple = target_triple,
         stdlib_linkflags = stdlib_linkflags,
         default_edition = ctx.attr.edition,
-        default_panic_strategy = default_panic_strategy,
         include_rustfmt = not (not ctx.attr.rustfmt_version),
         include_llvm_tools = include_llvm_tools,
         include_linker = include_linker,
