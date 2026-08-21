@@ -2,7 +2,8 @@
 
 ## Status
 
-Design only. Not implemented.
+Implemented on `cerisier/rust-panic-runtime-selection`; verification recorded
+below. Not yet proposed as a PR.
 
 Reviewed by a fresh-context agent. Verdict: accept the singular-`CcInfo`
 architecture with the scope corrections recorded below.
@@ -149,3 +150,17 @@ Remove:
 - Demonstrated facts, unsupported boundaries, exact commands, and observed
   action/artifact/runtime results are incorporated into the future PR
   justification.
+
+## Implementation result
+
+- Setting reduced to `unset | unwind | abort`.
+- Repository-time rustc query and target-default toolchain plumbing removed.
+- Existing singular std/allocator `CcInfo` fields retained; plural maps removed.
+- One scalar controls target Rust code generation and the constructed runtime
+  closure; exec configurations keep legacy behavior.
+- Missing global intent, local opt-in/opt-out, distributed ThinLTO, no-std,
+  aborting test harnesses, and abort with std dylib have focused diagnostics.
+- Previously failing missing-intent and no-std regressions now pass.
+- Focused cc-common-link, stdlib, toolchain, and complete LTO suites pass.
+- Linux hermetic-LLVM action contains `panic_abort` only; downloaded output is
+  x86-64 ELF; uncached remote runtime test observes `SIGABRT` and passes.

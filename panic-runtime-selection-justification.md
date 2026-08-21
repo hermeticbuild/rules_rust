@@ -115,24 +115,19 @@ The appropriate implementation layer is therefore the rules_rust code that:
 
 The implementation uses a narrower, explicit contract:
 
-- `cc_common_link_panic_strategy` declares `target-default`, `unwind`, `abort`,
-  or `immediate-abort` for configurations using `experimental_use_cc_common_link`;
-- generated toolchains query the selected rustc's `panic="..."` target cfg rather
-  than maintaining a target list;
-- when repository evaluation cannot execute a compiler selected for a remote
-  platform, the toolchain records `unknown`: `target-default` then fails closed
-  for cc-common linking and asks for an explicit strategy;
+- `cc_common_link_panic_strategy` is `unset`, `unwind`, or `abort`;
+- global `experimental_use_cc_common_link` requires an explicit strategy;
+- rule-local cc-common opt-in, rule-local opt-out from global mode, and
+  distributed ThinLTO without that global pair fail during analysis;
 - the selected strategy is appended to rustc as a final canonical
-  `-Cpanic=<strategy>` argument, after authored and opaque argument sources;
-- the same value selects the standard-library/allocator `CcInfo` closure for the
-  final `cc_common.link` action and every target-configuration Rust library;
-- normal rustc-owned final links are unchanged when cc-common linking is disabled;
-- explicit strategy selection requires configuration-wide cc-common linking so
-  dependencies cannot silently use another intent;
-- `immediate-abort` fails during analysis unless the sysroot has the matching
-  default strategy; and
-- non-unwind `rust_test` fails during analysis because stable rustc requires the
-  unsupported `-Zpanic_abort_tests` option for such test harnesses.
+  `-Cpanic=<strategy>` argument for every non-exec target Rust compilation;
+- the same scalar constructs the one std/allocator `CcInfo` closure for that
+  configured target and therefore the final `cc_common.link` action;
+- with global mode disabled, the setting does not affect rustc actions or the
+  legacy singular `CcInfo` closure;
+- exec-configured crates and proc macros retain their existing behavior; and
+- no-std, aborting test harnesses, and abort with the distributed std dylib fail
+  during analysis because this implementation cannot represent them correctly.
 
 The implementation intentionally does not parse arbitrary rustc flags or emulate
 metadata-only per-crate compatibility requirements.
@@ -142,12 +137,14 @@ metadata-only per-crate compatibility requirements.
 The following focused tests pass after the change:
 
 ```text
-//unit:default_panic_runtime_is_unwind                           PASSED
 //unit:canonical_abort_setting_controls_codegen_and_link         PASSED
 //unit:canonical_abort_setting_controls_rust_dependency_codegen  PASSED
+//unit:canonical_abort_setting_controls_rustc_owned_staticlib    PASSED
 //unit:canonical_unwind_setting_controls_codegen_and_link        PASSED
 //unit:panic_setting_does_not_change_rustc_owned_link            PASSED
-//unit:panic_immediate_abort_rejects_unwind_std                  PASSED
+//unit:panic_setting_does_not_change_exec_proc_macro             PASSED
+//unit:cc_common_link_requires_explicit_panic_strategy           PASSED
+//unit:explicit_panic_strategy_rejects_no_std                    PASSED
 //unit:panic_abort_rust_test_is_rejected                         PASSED
 //unit:panic_abort_std_dylib_is_rejected                         PASSED
 //unit:explicit_panic_strategy_requires_global_cc_common         PASSED
@@ -184,17 +181,8 @@ bazel test --config=remote \
 Result: one test executed and passed. The downloaded output is an x86-64 Linux
 ELF, and `llvm readelf -h` reports `ELF64` / `Advanced Micro Devices X86-64`.
 
-For the same remote Linux platform, omitting an explicit strategy while retaining
-`target-default` fails during analysis with:
-
-```text
-cc_common_link_panic_strategy=target-default cannot be resolved because the
-selected rustc cannot run on the Bazel client; set the strategy explicitly
-```
-
-This negative result is intentional: repository rules execute on the macOS Bazel
-client, where the selected Linux rustc cannot run. Guessing a target default
-would violate the exact-toolchain contract.
+Omitting the strategy under global cc-common linking fails during analysis. No
+repository-time compiler execution or target-default inference is involved.
 
 ## Remaining architectural limitations
 
@@ -228,18 +216,16 @@ per-crate rustc decision from arbitrary command-line flags:
   or arrive through an opaque `Args` value.
 - Unsupported cases fail closed rather than claiming rustc equivalence.
 
-Candidate setting:
+Implemented setting:
 
 ```text
 --@rules_rust//rust/settings:cc_common_link_panic_strategy=
-    target-default | unwind | abort | immediate-abort
+    unset | unwind | abort
 ```
 
-The setting has no effect on a normal rustc-owned final link. `target-default`
-must resolve from the exact selected Rust toolchain/target, not a hand-maintained
-target list. If the selected compiler cannot run during repository evaluation,
-`target-default` fails closed for cc-common linking. Explicit strategies express
-user intent directly and remain usable for that remote-platform case.
+`unset` is the default. The setting has no effect while global cc-common linking
+is disabled. Global mode rejects `unset`: rules_rust does not guess target intent
+after taking final-link ownership from rustc.
 
 ### Why this can remove current machinery
 
@@ -256,14 +242,14 @@ Rust crates contributing to the Bazel-owned link, rules_rust no longer needs to:
 
 The implementation still must:
 
-- construct/select distinct unwind, abort, and immediate-abort std/allocator
-  `CcInfo` closures;
+- construct the one unwind or abort std/allocator `CcInfo` closure selected for
+  the configured target;
 - apply the setting to Rust libraries whose public `CcInfo` reaches the final
   C++ link, not only to the final binary's object compilation;
 - append the canonical rustc flag after every other Rust flag source;
-- resolve `target-default` accurately;
 - reject non-unwind std dylibs unless the toolchain supplies a matching dylib;
-- reject `immediate-abort` unless the sysroot was built for it; and
+- reject no-std and aborting test harnesses until their contracts are supported;
+- keep exec-configured crates outside the target setting; and
 - test the generated Rust actions and final C++ link artifact/action.
 
 Applying the setting only to the final Rust crate would be incorrect. An rlib's
@@ -285,8 +271,9 @@ inside one Bazel-owned Rust link graph. In particular:
 - a `cc_binary` directly aggregating Rust libraries from different configurations
   remains outside the guarantee unless a single validating aggregation rule is
   introduced; and
-- `no_std`, proc-macro/exec-configuration behavior, and std dylib support need
-  explicit decisions rather than accidental inheritance.
+- no-std is rejected under global explicit mode;
+- proc-macro/exec configurations retain legacy behavior; and
+- abort with the distributed unwind std dylib is rejected.
 
 These boundaries are stricter than rustc, but they are internally complete: for
 the supported intent, one declared strategy controls both code generation and the
@@ -306,10 +293,10 @@ a concrete use case justifies the provider and validation machinery.
    override the canonical setting; action inspection proves final argument order.
 5. A transitive Rust-library chain cannot reintroduce the other runtime through
    public `CcInfo`; final action/artifact inspection proves the closure.
-6. `target-default` matches the exact selected rustc target configuration,
-   including an abort-default target and a custom target JSON.
-7. Unsupported std-dylib, `immediate-abort` sysroot, mixed-transition, and chosen
-   `no_std` boundaries produce explicit analysis errors.
+6. Missing global intent, local opt-in/opt-out, and distributed ThinLTO without
+   the global pair produce explicit analysis errors.
+7. Unsupported std-dylib, rust-test, mixed-transition, and no-std boundaries are
+   rejected or explicitly documented outside the guarantee.
 8. A hermetic-LLVM Linux test inspects the final ELF/link action and runs a small
    binary as supplementary behavioral evidence.
 
@@ -317,15 +304,12 @@ a concrete use case justifies the provider and validation machinery.
 
 1. Add the typed setting and document its supported scope in the setting's own
    help text.
-2. Resolve `target-default` from the selected Rust toolchain and expose the value
-   in toolchain data used by analysis.
+2. Require an explicit strategy whenever global cc-common linking is active.
 3. Append the canonical rustc panic option last for target Rust crates belonging
    to a configuration using Bazel-owned final linking.
-4. Keep the strategy-indexed std/allocator closure construction and select the
-   declared closure for final links and Rust-library public `CcInfo`.
-5. Remove the flag parser, opaque-Args strategy parameter, transitive
-   `RustCcInfo.panic_strategies`, crate-group/Prost plumbing, and representable
-   per-crate compatibility checks.
+4. Construct only the existing singular std/allocator `CcInfo` fields using the
+   selected scalar.
+5. Remove repository-time target-default discovery and the plural strategy maps.
 6. Add failing-first action tests for abort selection, argument precedence, and a
    transitive rlib chain; add negative tests for every declared unsupported case.
 7. Add the Linux hermetic-LLVM action/artifact/runtime coverage and compare the
