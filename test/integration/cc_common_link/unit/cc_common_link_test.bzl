@@ -7,7 +7,9 @@ load(
     "@rules_rust//rust:defs.bzl",
     "rust_binary",
     "rust_library",
+    "rust_proc_macro",
     "rust_shared_library",
+    "rust_static_library",
     "rust_test",
 )
 load("@rules_rust//rust:toolchain.bzl", "rust_stdlib_filegroup", "rust_toolchain")
@@ -25,11 +27,17 @@ collect_dep_actions_aspect = aspect(
 )
 
 def _use_cc_common_link_transition_impl(_settings, _attr):
-    return {"@rules_rust//rust/settings:experimental_use_cc_common_link": True}
+    return {
+        "@rules_rust//rust/settings:cc_common_link_panic_strategy": "unwind",
+        "@rules_rust//rust/settings:experimental_use_cc_common_link": True,
+    }
 
 use_cc_common_link_transition = transition(
     inputs = [],
-    outputs = ["@rules_rust//rust/settings:experimental_use_cc_common_link"],
+    outputs = [
+        "@rules_rust//rust/settings:cc_common_link_panic_strategy",
+        "@rules_rust//rust/settings:experimental_use_cc_common_link",
+    ],
     implementation = _use_cc_common_link_transition_impl,
 )
 
@@ -317,6 +325,27 @@ rustc_owned_panic_strategy_is_unchanged_test = analysistest.make(
     },
 )
 
+def _exec_panic_strategy_is_unchanged_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+    rustc_actions = [action for action in registered_actions if action.mnemonic == "Rustc"]
+    asserts.equals(env, 1, len(rustc_actions))
+    panic_args = [
+        arg
+        for arg in rustc_actions[0].argv
+        if arg.startswith("-Cpanic=") or arg.startswith("--codegen=panic=")
+    ]
+    asserts.equals(env, [], panic_args)
+    return analysistest.end(env)
+
+exec_panic_strategy_is_unchanged_test = analysistest.make(
+    _exec_panic_strategy_is_unchanged_test,
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+)
+
 panic_runtime_hermetic_llvm_linux_test = analysistest.make(
     _panic_runtime_selection_test,
     attrs = {
@@ -336,12 +365,22 @@ def _incompatible_panic_strategy_test(ctx):
     asserts.expect_failure(env, ctx.attr.expected_error)
     return analysistest.end(env)
 
-immediate_abort_requires_matching_sysroot_test = analysistest.make(
+missing_explicit_panic_strategy_test = analysistest.make(
     _incompatible_panic_strategy_test,
     attrs = {"expected_error": attr.string(mandatory = True)},
     config_settings = {
-        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "immediate-abort",
         str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+    },
+    expect_failure = True,
+)
+
+abort_no_std_is_unsupported_test = analysistest.make(
+    _incompatible_panic_strategy_test,
+    attrs = {"expected_error": attr.string(mandatory = True)},
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:cc_common_link_panic_strategy")): "abort",
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): True,
+        str(Label("@rules_rust//rust/settings:no_std")): "alloc",
     },
     expect_failure = True,
 )
@@ -419,6 +458,46 @@ def _cc_common_link_test_targets():
     with_collect_dep_actions(
         name = "panic_dependency_actions",
         target = ":panic_dependency",
+    )
+
+    rust_static_library(
+        name = "canonical_abort_panic_staticlib",
+        srcs = ["lib.rs"],
+        deps = [":panic_dependency"],
+        edition = "2021",
+        rustc_flags = ["--codegen=panic=unwind"],
+    )
+
+    with_collect_dep_actions(
+        name = "canonical_abort_panic_staticlib_actions",
+        target = ":canonical_abort_panic_staticlib",
+    )
+
+    write_file(
+        name = "panic_proc_macro_src",
+        out = "panic_proc_macro.rs",
+        content = [
+            "extern crate proc_macro;",
+            "use proc_macro::TokenStream;",
+            "#[proc_macro]",
+            "pub fn identity(input: TokenStream) -> TokenStream { input }",
+        ],
+    )
+
+    rust_proc_macro(
+        name = "panic_proc_macro",
+        srcs = [":panic_proc_macro_src"],
+        edition = "2021",
+    )
+
+    with_collect_dep_actions(
+        name = "panic_proc_macro_actions",
+        target = ":panic_proc_macro",
+    )
+
+    with_exec_cfg(
+        name = "panic_proc_macro_exec_actions",
+        target = ":panic_proc_macro_actions",
     )
 
     rust_binary(
@@ -582,6 +661,13 @@ def _cc_common_link_test_targets():
         expected_strategy = "abort",
     )
 
+    canonical_abort_panic_strategy_test(
+        name = "canonical_abort_setting_controls_rustc_owned_staticlib",
+        target_under_test = ":canonical_abort_panic_staticlib_actions",
+        expect_cpp_link = False,
+        expected_strategy = "abort",
+    )
+
     canonical_unwind_panic_strategy_test(
         name = "canonical_unwind_setting_controls_codegen_and_link",
         target_under_test = ":bin_with_collect_dep_actions",
@@ -595,6 +681,11 @@ def _cc_common_link_test_targets():
         target_under_test = ":rustc_owned_panic_bin_actions",
     )
 
+    exec_panic_strategy_is_unchanged_test(
+        name = "panic_setting_does_not_change_exec_proc_macro",
+        target_under_test = ":panic_proc_macro_exec_actions",
+    )
+
     panic_runtime_hermetic_llvm_linux_test(
         name = "panic_abort_runtime_is_abort_linux_llvm",
         target_under_test = ":canonical_abort_panic_bin_actions",
@@ -602,10 +693,16 @@ def _cc_common_link_test_targets():
         unexpected_runtime = "panic_unwind",
     )
 
-    immediate_abort_requires_matching_sysroot_test(
-        name = "panic_immediate_abort_rejects_unwind_std",
-        target_under_test = ":panic_immediate_abort_bin",
-        expected_error = "panic=immediate-abort requires a standard library compiled with immediate-abort",
+    missing_explicit_panic_strategy_test(
+        name = "cc_common_link_requires_explicit_panic_strategy",
+        target_under_test = ":bin",
+        expected_error = "requires cc_common_link_panic_strategy=unwind or abort",
+    )
+
+    abort_no_std_is_unsupported_test(
+        name = "explicit_panic_strategy_rejects_no_std",
+        target_under_test = ":bin",
+        expected_error = "is unsupported with no_std",
     )
 
     abort_panic_rust_test_is_unsupported_test(
@@ -647,10 +744,13 @@ def _cc_common_link_test_targets():
         "default_panic_runtime_is_unwind",
         "canonical_abort_setting_controls_codegen_and_link",
         "canonical_abort_setting_controls_rust_dependency_codegen",
+        "canonical_abort_setting_controls_rustc_owned_staticlib",
         "canonical_unwind_setting_controls_codegen_and_link",
         "panic_setting_does_not_change_rustc_owned_link",
+        "panic_setting_does_not_change_exec_proc_macro",
         "panic_abort_runtime_is_abort_linux_llvm",
-        "panic_immediate_abort_rejects_unwind_std",
+        "cc_common_link_requires_explicit_panic_strategy",
+        "explicit_panic_strategy_rejects_no_std",
         "panic_abort_rust_test_is_rejected",
         "panic_abort_std_dylib_is_rejected",
         "explicit_panic_strategy_requires_global_cc_common",

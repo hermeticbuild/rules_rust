@@ -16,6 +16,7 @@ load(
 
 _ALLOCATOR_LIBRARIES_SETTING = str(Label("//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols"))
 _CC_COMMON_LINK_SETTING = str(Label("//rust/settings:experimental_use_cc_common_link"))
+_CC_COMMON_LINK_PANIC_SETTING = str(Label("//rust/settings:cc_common_link_panic_strategy"))
 _GLOBAL_ALLOCATOR_SETTING = str(Label("//rust/settings:experimental_use_global_allocator"))
 _LLVM_LINUX_CONFIG_SETTINGS = {
     "//command_line_option:extra_toolchains": ["@llvm//toolchain:all"],
@@ -248,6 +249,17 @@ _distributed_thin_lto_requires_allocator_setting_test = analysistest.make(
     config_settings = _LLVM_LINUX_CONFIG_SETTINGS | {
         "//command_line_option:features": ["thin_lto"],
     },
+)
+
+def _distributed_thin_lto_requires_explicit_panic_strategy(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "distributed ThinLTO requires global cc-common linking and cc_common_link_panic_strategy=unwind or abort")
+    return analysistest.end(env)
+
+_distributed_thin_lto_requires_explicit_panic_strategy_test = analysistest.make(
+    _distributed_thin_lto_requires_explicit_panic_strategy,
+    expect_failure = True,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS,
 )
 
 _thin_lto_feature_overrides_manual_lto_setting_test = analysistest.make(
@@ -508,6 +520,11 @@ def lto_test_suite(name):
         target_under_test = ":distributed_bin",
     )
 
+    _distributed_thin_lto_requires_explicit_panic_strategy_test(
+        name = "distributed_thin_lto_requires_explicit_panic_strategy_test",
+        target_under_test = ":distributed_bin",
+    )
+
     _thin_lto_feature_overrides_manual_lto_setting_test(
         name = "thin_lto_feature_overrides_manual_lto_setting_test",
         target_under_test = ":distributed_bin",
@@ -547,6 +564,7 @@ def lto_test_suite(name):
             ":distributed_thin_lto_global_allocator_test",
             ":distributed_thin_lto_cc_binary_test",
             ":distributed_thin_lto_requires_allocator_setting_test",
+            ":distributed_thin_lto_requires_explicit_panic_strategy_test",
             ":thin_lto_feature_overrides_manual_lto_setting_test",
             ":wasm_thin_lto_binary_test",
             ":no_std_thin_lto_binary_test",
