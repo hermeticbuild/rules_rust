@@ -159,7 +159,14 @@ bool expand_response_file_placeholders(std::string* arg, const std::string& pwd,
         return false;
     }
 
+#if defined(_WIN32)
+    // _spawnvp requires embedded quotes to preserve spaces within an argument.
+    *arg = expanded_file.find_first_of(" \t") == std::string::npos
+               ? "@" + expanded_file
+               : "\"@" + expanded_file + "\"";
+#else
     *arg = "@" + expanded_file;
+#endif
     return true;
 }
 
