@@ -471,10 +471,7 @@ fn query_label_for(
     let package = find_owning_package(workspace, file_rel).with_context(|| {
         format!("no BUILD.bazel found above {saved_file} — is this file part of a Bazel target?")
     })?;
-    let file_basename = file_rel
-        .file_name()
-        .with_context(|| format!("saved file {saved_file} has no file name"))?;
-    let pattern = format!("//{package}:{file_basename}");
+    let pattern = source_file_label(&package, file_rel)?;
     let query = format!("attr(srcs, {pattern:?}, //{package}:*)");
     let output = Command::new(bazel.as_str())
         .current_dir(workspace)
@@ -493,6 +490,13 @@ fn query_label_for(
         .find(|l| !l.is_empty())
         .map(str::to_owned)
         .with_context(|| format!("bazel query returned no targets for {pattern}"))
+}
+
+fn source_file_label(package: &Utf8Path, file_rel: &Utf8Path) -> Result<String> {
+    let file_in_package = file_rel
+        .strip_prefix(package)
+        .with_context(|| format!("file {file_rel} is not under Bazel package //{package}"))?;
+    Ok(format!("//{package}:{file_in_package}"))
 }
 
 /// Walk up looking for `BUILD.bazel` or `BUILD`. Returns the
@@ -524,6 +528,26 @@ fn scopeguard(path: Utf8PathBuf) -> impl Drop {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn source_file_labels_preserve_package_relative_paths() {
+        for (package, file, expected) in [
+            (
+                "lib/android-boot-protocol",
+                "lib/android-boot-protocol/src/adb.rs",
+                "//lib/android-boot-protocol:src/adb.rs",
+            ),
+            ("", "src/utils/lib.rs", "//:src/utils/lib.rs"),
+            ("pkg", "pkg/lib.rs", "//pkg:lib.rs"),
+            ("", "lib.rs", "//:lib.rs"),
+            ("pkg/src", "pkg/src/utils/lib.rs", "//pkg/src:utils/lib.rs"),
+        ] {
+            assert_eq!(
+                source_file_label(Utf8Path::new(package), Utf8Path::new(file)).unwrap(),
+                expected,
+            );
+        }
+    }
 
     #[test]
     fn relative_file_names_become_absolute() {
