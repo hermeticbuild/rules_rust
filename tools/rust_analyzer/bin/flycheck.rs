@@ -467,10 +467,7 @@ fn query_string_for(workspace: &Utf8Path, saved_file: &Utf8Path) -> Result<Strin
     })?;
 
     // Generate a label that preserves the package-relative file path.
-    let file_in_package = file_rel.strip_prefix(&package).with_context(|| {
-        format!("saved file {saved_file} is not under Bazel package //{package}")
-    })?;
-    let pattern = format!("//{package}:{file_in_package}");
+    let pattern = source_file_label(&package, file_rel)?;
     Ok(format!("attr(srcs, {pattern:?}, //{package}:*)"))
 }
 
@@ -500,6 +497,13 @@ fn query_label_for(
         .find(|l| !l.is_empty())
         .map(str::to_owned)
         .with_context(|| format!("bazel query {query:?} returned no targets"))
+}
+
+fn source_file_label(package: &Utf8Path, file_rel: &Utf8Path) -> Result<String> {
+    let file_in_package = file_rel
+        .strip_prefix(package)
+        .with_context(|| format!("file {file_rel} is not under Bazel package //{package}"))?;
+    Ok(format!("//{package}:{file_in_package}"))
 }
 
 /// Walk up looking for `BUILD.bazel` or `BUILD`. Returns the
@@ -571,6 +575,26 @@ mod tests {
             query_string_for(&workspace, &workspace.join(&rust_src_path)).unwrap(),
             r#"attr(srcs, "//example/library:src/main.rs", //example/library:*)"#
         );
+    }
+
+    #[test]
+    fn source_file_labels_preserve_package_relative_paths() {
+        for (package, file, expected) in [
+            (
+                "lib/android-boot-protocol",
+                "lib/android-boot-protocol/src/adb.rs",
+                "//lib/android-boot-protocol:src/adb.rs",
+            ),
+            ("", "src/utils/lib.rs", "//:src/utils/lib.rs"),
+            ("pkg", "pkg/lib.rs", "//pkg:lib.rs"),
+            ("", "lib.rs", "//:lib.rs"),
+            ("pkg/src", "pkg/src/utils/lib.rs", "//pkg/src:utils/lib.rs"),
+        ] {
+            assert_eq!(
+                source_file_label(Utf8Path::new(package), Utf8Path::new(file)).unwrap(),
+                expected,
+            );
+        }
     }
 
     #[test]
