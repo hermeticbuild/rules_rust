@@ -3138,8 +3138,8 @@ def add_crate_link_flags(args, dep_info, force_all_deps_direct = False, use_meta
     args.add_all(direct_crates, uniquify = True, map_each = crate_to_link_flags)
 
     args.add_all(
-        dep_info.transitive_crates,
-        map_each = _get_crate_dirname,
+        dep_info.transitive_crate_outputs,
+        map_each = _get_dirname,
         uniquify = True,
         format_each = "-Ldependency=%s",
     )
