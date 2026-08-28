@@ -214,11 +214,11 @@ def _pwd_flags_fsanitize_ignorelist(args):
 
 def _pwd_flags_isystem(args):
     """Prefix execroot-relative paths in -isystem-like arguments with ${pwd}."""
-    return _prefix_pwd_to_flag(args, ["-isystem", "-isystem-after", "-internal-isystem", "-cxx-isystem", "-stdlib++-isystem"])
+    return _prefix_pwd_to_flag(args, ["-isystem", "-isystem-after", "-internal-isystem", "-cxx-isystem", "-stdlib++-isystem", "/imsvc"])
 
 def _pwd_flags_L(args):
     """Prefix execroot-relative paths in -L arguments with ${pwd}."""
-    return _prefix_pwd_to_flag(args, ["-LIBPATH=", "-LIBPATH:", "-LIBPATH", "-L"])
+    return _prefix_pwd_to_flag(args, ["-LIBPATH=", "-LIBPATH:", "-LIBPATH", "/LIBPATH:", "/LIBPATH", "-L"])
 
 def _pwd_flags_B(args):
     """Prefix execroot-relative paths in -B arguments with ${pwd}."""
@@ -231,6 +231,10 @@ def _pwd_flags_resource_dir(args):
 def _pwd_flags_imacros(args):
     """Prefix execroot-relative paths in -imacros arguments with ${pwd}."""
     return _prefix_pwd_to_flag(args, ["-imacros"])
+
+def _pwd_flags_vfsoverlay(args):
+    """Prefix execroot-relative paths in VFS overlay arguments with ${pwd}."""
+    return _prefix_pwd_to_flag(args, ["-ivfsoverlay", "-vfsoverlay=", "-vfsoverlay", "/vfsoverlay:", "/vfsoverlay"])
 
 _DIRECT_LIB_EXTENSIONS = (".a", ".o", ".so", ".dylib")
 
@@ -264,7 +268,10 @@ def _pwd_paths(args):
     return _prefix_pwd_to_paths(args)
 
 def _pwd_flags(args):
-    return _pwd_flags_direct_libs(_pwd_flags_imacros(_pwd_flags_fsanitize_ignorelist(_pwd_flags_isystem(_pwd_flags_L(_pwd_flags_B(_pwd_flags_resource_dir(_pwd_flags_sysroot(args))))))))
+    clang_cl_prefix = "/clang:"
+    unwrapped_args = [arg[len(clang_cl_prefix):] if arg.startswith(clang_cl_prefix) else arg for arg in args]
+    mapped_args = _pwd_flags_direct_libs(_pwd_flags_vfsoverlay(_pwd_flags_imacros(_pwd_flags_fsanitize_ignorelist(_pwd_flags_isystem(_pwd_flags_L(_pwd_flags_B(_pwd_flags_resource_dir(_pwd_flags_sysroot(unwrapped_args)))))))))
+    return [clang_cl_prefix + arg if args[i].startswith(clang_cl_prefix) else arg for i, arg in enumerate(mapped_args)]
 
 def _feature_enabled(ctx, feature_name, default = False):
     """Check if a feature is enabled.
