@@ -34,6 +34,7 @@ rust_library(
     srcs = ["src/lib.rs"],
     edition = "2018",
     rustc_env_files = [":generate_rustc_env_file"],
+    rustc_env_paths = {":generate_rustc_env_file": "RUSTC_ENV_PATH"},
 )
 
 rust_test(

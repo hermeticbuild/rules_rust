@@ -58,6 +58,7 @@ def _rustdoc_crate_info(crate_info, output):
         edition = crate_info.edition,
         rustc_env = crate_info.rustc_env,
         rustc_env_files = crate_info.rustc_env_files,
+        rustc_env_paths = crate_info.rustc_env_paths,
         is_test = crate_info.is_test,
         compile_data = crate_info.compile_data,
         compile_data_targets = crate_info.compile_data_targets,

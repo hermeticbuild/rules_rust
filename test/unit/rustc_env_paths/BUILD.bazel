@@ -1,0 +1,5 @@
+load(":rustc_env_paths_test.bzl", "rustc_env_paths_test_suite")
+
+rustc_env_paths_test_suite(
+    name = "rustc_env_paths_test_suite",
+)

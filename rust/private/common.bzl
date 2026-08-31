@@ -61,6 +61,8 @@ def _create_crate_info(**kwargs):
         kwargs.update({"extra_named_deps": depset([])})
     if not "rustc_env_files" in kwargs:
         kwargs.update({"rustc_env_files": []})
+    if not "rustc_env_paths" in kwargs:
+        kwargs.update({"rustc_env_paths": {}})
     if not "data" in kwargs:
         kwargs.update({"data": depset([])})
     if not "root_path" in kwargs:

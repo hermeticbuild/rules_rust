@@ -40,6 +40,7 @@ CrateInfo = provider(
         "root_path": "str: If root is a directory, path to the source entrypoint under it.",
         "rustc_env": "Dict[String, String]: Additional `\"key\": \"value\"` environment variables to set for rustc.",
         "rustc_env_files": "[File]: Files containing additional environment variables to set for rustc.",
+        "rustc_env_paths": "Dict[String, File]: File paths to expose to rustc through environment variables.",
         "rustc_output": "File: The output from rustc from producing the output file. It is optional.",
         "rustc_rmeta_output": "File: The rmeta file produced for this crate. It is optional.",
         "srcs": "depset[File]: All source Files that are part of the crate.",

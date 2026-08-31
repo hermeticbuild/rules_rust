@@ -162,6 +162,20 @@ def _validate_root_path(ctx):
     elif not should_use_root_path and has_root_path:
         fail("`root_path` can only be used when `crate_root` is not set and `srcs` is a single directory artifact.")
 
+def _collect_rustc_env_paths(targets):
+    result = {}
+    for target, env_name in targets.items():
+        files = target[DefaultInfo].files.to_list()
+        if len(files) != 1:
+            fail("rustc_env_paths target {} must produce exactly one file, got {}".format(
+                target.label,
+                len(files),
+            ))
+        if env_name in result:
+            fail("rustc_env_paths contains multiple files for environment variable {}".format(env_name))
+        result[env_name] = files[0]
+    return result
+
 def _rust_library_common(ctx, crate_type):
     """The common implementation of the library-like rules.
 
@@ -248,6 +262,7 @@ def _rust_library_common(ctx, crate_type):
             edition = get_edition(ctx.attr, toolchain, ctx.label),
             rustc_env = ctx.attr.rustc_env,
             rustc_env_files = ctx.files.rustc_env_files,
+            rustc_env_paths = _collect_rustc_env_paths(ctx.attr.rustc_env_paths),
             is_test = False,
             data = depset(ctx.files.data),
             compile_data = depset(compile_data),
@@ -316,6 +331,7 @@ def _rust_binary_impl(ctx):
             edition = get_edition(ctx.attr, toolchain, ctx.label),
             rustc_env = ctx.attr.rustc_env,
             rustc_env_files = ctx.files.rustc_env_files,
+            rustc_env_paths = _collect_rustc_env_paths(ctx.attr.rustc_env_paths),
             is_test = False,
             data = depset(ctx.files.data),
             compile_data = depset(compile_data),
@@ -412,6 +428,8 @@ def _rust_test_impl(ctx):
         else:
             compile_data_targets = depset(ctx.attr.compile_data)
         rustc_env_files = ctx.files.rustc_env_files + crate.rustc_env_files
+        rustc_env_paths = dict(crate.rustc_env_paths)
+        rustc_env_paths.update(_collect_rustc_env_paths(ctx.attr.rustc_env_paths))
 
         # crate.rustc_env is already expanded upstream in rust_library rule implementation
         rustc_env = dict(crate.rustc_env)
@@ -442,6 +460,7 @@ def _rust_test_impl(ctx):
             edition = crate.edition,
             rustc_env = rustc_env,
             rustc_env_files = rustc_env_files,
+            rustc_env_paths = rustc_env_paths,
             is_test = True,
             compile_data = depset(compile_data),
             compile_data_targets = compile_data_targets,
@@ -500,6 +519,7 @@ def _rust_test_impl(ctx):
             edition = get_edition(ctx.attr, toolchain, ctx.label),
             rustc_env = rustc_env,
             rustc_env_files = ctx.files.rustc_env_files,
+            rustc_env_paths = _collect_rustc_env_paths(ctx.attr.rustc_env_paths),
             is_test = True,
             compile_data = depset(compile_data),
             compile_data_targets = depset(ctx.attr.compile_data),
@@ -867,6 +887,20 @@ _COMMON_ATTRS = {
             stamping should the `stamp` attribute be enabled. Stamp variables
             should be wrapped in brackets in order to be resolved. E.g.
             `NAME={WORKSPACE_STATUS_VARIABLE}`.
+        """),
+        allow_files = True,
+    ),
+    "rustc_env_paths": attr.label_keyed_string_dict(
+        doc = dedent("""\
+            Dictionary mapping labels that produce one file to environment variable names.
+
+            The file path is passed to rustc through a path-mapping-aware command-line
+            argument. This should be used instead of `rustc_env` with `$(execpath)` when
+            the path must remain valid with `--experimental_output_paths=strip`.
+
+            Environment variable names must not conflict with variables supplied through
+            `rustc_env`, the Rust toolchain, or rules_rust itself. Variables loaded from
+            `rustc_env_files` take precedence and should likewise use distinct names.
         """),
         allow_files = True,
     ),
