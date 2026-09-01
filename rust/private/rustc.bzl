@@ -792,8 +792,9 @@ def collect_inputs(
     # flattened on each transitive rust_library dependency.
     is_linking_action = crate_info.type not in ("lib", "rlib") or force_link_inputs
 
-    # rustc invokes dlltool for raw-dylib imports even when compiling an rlib.
-    needs_dlltool = cc_toolchain and toolchain.target_os == "windows" and toolchain.target_abi != "msvc"
+    # rustc invokes dlltool for Windows GNU raw-dylib imports, including in rlibs.
+    # Windows GNU LLVM and MSVC generate import libraries inside rustc.
+    needs_dlltool = cc_toolchain and toolchain.target_os == "windows" and toolchain.target_abi == "gnu"
     needs_linker_files = (is_linking_action and not experimental_use_cc_common_link) or needs_dlltool
     libs_from_linker_inputs = []
     ambiguous_libs = {}
@@ -1406,7 +1407,7 @@ def construct_arguments(
 
     # gcc runs dlltool internally when acting as the linker, but rustc drives the linker directly so
     # it needs dlltool's path: apply outside the link-emit gate below since rlib compiles need it too.
-    if cc_toolchain and toolchain.target_os == "windows" and toolchain.target_abi != "msvc":
+    if cc_toolchain and toolchain.target_os == "windows" and toolchain.target_abi == "gnu":
         linker_path = cc_common.get_tool_for_action(
             feature_configuration = feature_configuration,
             action_name = CPP_LINK_EXECUTABLE_ACTION_NAME,

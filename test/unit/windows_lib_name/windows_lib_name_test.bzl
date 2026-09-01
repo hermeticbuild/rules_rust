@@ -225,7 +225,7 @@ def _rlib_dlltool_inputs_test_impl(ctx):
     for target_os, target_abi, crate_type, expect_dlltool in [
         ("windows", "gnu", "lib", True),
         ("windows", "gnu", "rlib", True),
-        ("windows", "gnullvm", "rlib", True),
+        ("windows", "gnullvm", "rlib", False),
         ("windows", "msvc", "rlib", False),
         ("linux", "gnu", "rlib", False),
     ]:
