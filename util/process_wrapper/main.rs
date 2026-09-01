@@ -24,6 +24,8 @@ use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::fs::{self, copy, OpenOptions};
 use std::io;
+#[cfg(any(windows, test))]
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::{exit, Command, Stdio};
 #[cfg(windows)]
@@ -94,6 +96,22 @@ impl TemporaryDirectoryGuard {
 
     fn take(&mut self) -> Option<PathBuf> {
         None
+    }
+}
+
+/// Matching on what rustc can actually use within a given `-Ldependency=` directory
+#[cfg(any(windows, test))]
+const CRATE_SEARCH_ARTIFACT_EXTENSIONS: &[&str] =
+    &["rlib", "rmeta", "dll", "lib", "a", "so", "dylib"];
+
+#[cfg(any(windows, test))]
+fn is_crate_search_artifact(file_name: &str) -> bool {
+    match Path::new(file_name).extension() {
+        Some(extension) => {
+            let extension = extension.to_string_lossy().to_ascii_lowercase();
+            CRATE_SEARCH_ARTIFACT_EXTENSIONS.contains(&extension.as_str())
+        }
+        None => false,
     }
 }
 
@@ -202,8 +220,7 @@ fn consolidate_dependency_search_paths(
             })?;
             let file_name = entry.file_name();
             let file_name_lower = file_name.to_string_lossy().to_ascii_lowercase();
-            // Concurrent rustc actions remove temporary .rcgu.o files.
-            if file_name_lower.ends_with(".rcgu.o") {
+            if !is_crate_search_artifact(&file_name_lower) {
                 continue;
             }
 
@@ -509,6 +526,48 @@ mod test {
     fn test_contains_byte_sequence_without_match() {
         let mut contents = io::Cursor::new(b"/sandbox/manifests".as_slice());
         assert!(!contains_byte_sequence(&mut contents, b"/sandbox/manifest/").unwrap());
+    }
+
+    #[test]
+    fn test_is_crate_search_artifact_skips_transient_and_irrelevant_files() {
+        for file_name in [
+            // LLVM's atomic-output temporary for a concurrently linked sibling target.
+            "ijent_util-subscriber_contract-test.exe.tmp8ceb5a4",
+            "libfoo-1a2b3c.rlib.tmp0f1e2d3",
+            "foo.rcgu.o",
+            "foo.exe",
+            "foo.pdb",
+            "foo.d",
+            "foo.rustc-output",
+            "noextension",
+        ] {
+            assert!(
+                !is_crate_search_artifact(file_name),
+                "{} should not be linked into the unified dependency dir",
+                file_name
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_crate_search_artifact_keeps_crate_artifacts() {
+        for file_name in [
+            "libfoo-1a2b3c.rlib",
+            "libfoo-1a2b3c.rmeta",
+            // Pipelined hollow rlib emitted into the `_meta/` subdirectory.
+            "libfoo_meta.rlib",
+            "foo.dll",
+            // Import library rustc emits alongside a Windows cdylib.
+            "foo.dll.lib",
+            "libfoo.a",
+            "FOO.RLIB",
+        ] {
+            assert!(
+                is_crate_search_artifact(file_name),
+                "{} should be linked into the unified dependency dir",
+                file_name
+            );
+        }
     }
 
     fn parse_json(json_str: &str) -> Result<JsonValue, String> {
