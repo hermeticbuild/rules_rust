@@ -211,6 +211,15 @@ def _rustdoc_test_with_cc_link_flags_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _rustdoc_test_with_dynamic_std_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    action = _get_action_by_mnemonic(env, tut, "RustdocTest")
+
+    assert_argv_contains(env, action, "--codegen=prefer-dynamic")
+
+    return analysistest.end(env)
+
 def _rustdoc_test_uses_cc_library_native_lib_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
@@ -241,6 +250,12 @@ rustdoc_with_json_error_format_test = analysistest.make(_rustdoc_with_json_error
 })
 rustdoc_test_runs_in_build_action_test = analysistest.make(_rustdoc_test_runs_in_build_action_test_impl)
 rustdoc_test_with_cc_link_flags_test = analysistest.make(_rustdoc_test_with_cc_link_flags_test_impl)
+rustdoc_test_with_dynamic_std_test = analysistest.make(
+    _rustdoc_test_with_dynamic_std_test_impl,
+    config_settings = {
+        str(Label("//rust/settings:experimental_link_std_dylib")): True,
+    },
+)
 rustdoc_test_uses_cc_library_native_lib_test = analysistest.make(_rustdoc_test_uses_cc_library_native_lib_test_impl)
 
 def _target_maker(rule_fn, name, rustdoc_deps = [], rustdoc_proc_macro_deps = [], **kwargs):
@@ -579,6 +594,12 @@ def rustdoc_test_suite(name):
         target_under_test = ":lib_doctest",
     )
 
+    rustdoc_test_with_dynamic_std_test(
+        name = "rustdoc_test_with_dynamic_std_test",
+        target_under_test = ":lib_doctest",
+        target_compatible_with = NOT_WINDOWS,
+    )
+
     rustdoc_test_with_cc_link_flags_test(
         name = "rustdoc_test_with_cc_link_flags_test",
         target_under_test = ":lib_with_cc_doctest",
@@ -618,6 +639,7 @@ def rustdoc_test_suite(name):
             ":rustdoc_with_args_test",
             ":rustdoc_with_json_error_format_test",
             ":rustdoc_test_runs_in_build_action_test",
+            ":rustdoc_test_with_dynamic_std_test",
             ":rustdoc_test_with_cc_link_flags_test",
             ":rustdoc_test_uses_cc_library_native_lib_test",
             ":rustdoc_for_generated_root_test",

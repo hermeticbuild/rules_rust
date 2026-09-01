@@ -1406,7 +1406,7 @@ _RUST_BINARY_ATTRS = {
         default = False,
         doc = dedent("""\
             Flag to dynamically link the standard library as a Rust dylib .so object when building this binary.
-            
+
             Default is false. This is often required when building a binary that depends on a Rust ABI dylib.
         """),
     ),

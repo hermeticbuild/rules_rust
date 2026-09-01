@@ -791,6 +791,10 @@ def collect_inputs(
     # the output is rlib. This avoids quadratic behavior where transitive noncrates are
     # flattened on each transitive rust_library dependency.
     is_linking_action = crate_info.type not in ("lib", "rlib") or force_link_inputs
+
+    # rustc invokes dlltool for raw-dylib imports even when compiling an rlib.
+    needs_dlltool = cc_toolchain and toolchain.target_os == "windows" and toolchain.target_abi != "msvc"
+    needs_linker_files = (is_linking_action and not experimental_use_cc_common_link) or needs_dlltool
     libs_from_linker_inputs = []
     ambiguous_libs = {}
     if is_linking_action:
@@ -846,8 +850,7 @@ def collect_inputs(
             toolchain.all_files,
         ] + ([] if experimental_use_cc_common_link or not is_linking_action else [
             runtime_libs,
-            linker_depset,
-        ]),
+        ]) + ([linker_depset] if needs_linker_files else []),
     )
 
     # Register linkstamps when linking with rustc (when linking with
@@ -1038,7 +1041,7 @@ def construct_arguments(
         inject_allow_features_guardrail = False,
         error_format = None,
         allowed_unstable_rust_features = None,
-        link_std_dylib = False,
+        link_std_dylib = None,
         runtime_libs = None,
         linker_plugin_lto = False):
     """Builds an Args object containing common rustc flags
@@ -1110,7 +1113,8 @@ def construct_arguments(
         inject_allow_features_guardrail (bool): When True, inject `-Zallow-features=` alongside `-Zno-codegen` to prevent silent unstable-feature enablement via RUSTC_BOOTSTRAP=1. Disabled on nightly toolchains (where unstable features are already allowed by default) and when the user manages bootstrap/allow-features themselves; gated in rustc_compile_action.
         error_format (str, optional): Error format to pass to the `--error-format` command line argument. If set to None, uses the "_error_format" entry in `attr`.
         allowed_unstable_rust_features (list, optional): List of unstable Rust language features allowed for this target.
-        link_std_dylib (bool): Whether to dynamically link the Rust standard library using `--prefer-dynamic`.
+        link_std_dylib (bool, optional): Whether to dynamically link the Rust standard library using
+            `--codegen=prefer-dynamic`. If None, use `toolchain._link_std_dylib` or `attr.link_std_dylib`.
         runtime_libs (depset[File], optional): Runtime libraries from the C++ toolchain
             selected for `crate_info.type`.
         linker_plugin_lto (bool): Whether to pass `-Clinker-plugin-lto` instead
@@ -1128,6 +1132,9 @@ def construct_arguments(
     """
     if build_metadata and not use_json_output:
         fail("build_metadata requires parse_json_output")
+
+    if link_std_dylib == None:
+        link_std_dylib = toolchain._link_std_dylib or getattr(attr, "link_std_dylib", False)
 
     output_dir = crate_info.output.dirname
     linker_script = getattr(file, "linker_script", None)

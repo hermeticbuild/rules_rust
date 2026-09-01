@@ -146,6 +146,16 @@ clippy_aspect_with_output_diagnostics_test = make_clippy_aspect_unittest(
     },
 )
 
+clippy_aspect_with_dynamic_std_test = make_clippy_aspect_unittest(
+    lambda ctx: _clippy_aspect_action_has_flag_impl(
+        ctx,
+        ["--codegen=prefer-dynamic"],
+    ),
+    config_settings = {
+        str(Label("//rust/settings:experimental_link_std_dylib")): True,
+    },
+)
+
 def clippy_test_suite(name):
     """Entry-point macro called from the BUILD file.
 
@@ -193,6 +203,11 @@ def clippy_test_suite(name):
         target_under_test = Label("//test/clippy:ok_library"),
     )
 
+    clippy_aspect_with_dynamic_std_test(
+        name = "clippy_aspect_with_dynamic_std_test",
+        target_under_test = Label("//test/clippy:ok_library"),
+    )
+
     native.test_suite(
         name = name,
         tests = [
@@ -205,5 +220,6 @@ def clippy_test_suite(name):
             ":clippy_aspect_without_clippy_error_format_test",
             ":clippy_aspect_with_clippy_error_format_test",
             ":clippy_aspect_with_output_diagnostics_test",
+            ":clippy_aspect_with_dynamic_std_test",
         ],
     )

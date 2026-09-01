@@ -127,7 +127,7 @@ def _rustdoc_link_args_analysis_test_impl(ctx):
     actions = tut[DepActionsInfo].actions
     action = None
     for candidate in actions:
-        if candidate.mnemonic in ["RustdocTestWriter", "RustdocTestCompile"]:
+        if candidate.mnemonic == "RustdocTest":
             action = candidate
             break
 
