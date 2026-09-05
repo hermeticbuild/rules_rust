@@ -1385,13 +1385,18 @@ def construct_arguments(
 
     # For determinism to help with build distribution and such
     if remap_path_prefix != None:
-        # `--remap-path-prefix` flags are applied in reverse order. We need to
-        # specify the outermost directory (output_base) first, so that it's
-        # remapped last. Otherwise we can end up with a partial rewrite where
-        # "/path/to/output_base/execroot" becomes "./execroot" rather than ".".
-        rustc_flags.add("--remap-path-prefix=${{output_base}}={}".format(remap_path_prefix))
-        rustc_flags.add("--remap-path-prefix=${{pwd}}={}".format(remap_path_prefix))
-        rustc_flags.add("--remap-path-prefix=${{exec_root}}={}".format(remap_path_prefix))
+        if toolchain._bootstrapping:
+            # rustc resolves cwd itself, so bootstrap response files need no
+            # placeholder substitution to remap source paths in crate metadata.
+            rustc_flags.add(remap_path_prefix, format = "-Zremap-cwd-prefix=%s")
+        else:
+            # `--remap-path-prefix` flags are applied in reverse order. We need to
+            # specify the outermost directory (output_base) first, so that it's
+            # remapped last. Otherwise we can end up with a partial rewrite where
+            # "/path/to/output_base/execroot" becomes "./execroot" rather than ".".
+            rustc_flags.add("--remap-path-prefix=${output_base}=%s" % remap_path_prefix)
+            rustc_flags.add("--remap-path-prefix=${pwd}=%s" % remap_path_prefix)
+            rustc_flags.add("--remap-path-prefix=${exec_root}=%s" % remap_path_prefix)
 
     emit_without_paths = []
     redirect_link_to_metadata = build_metadata and crate_info.metadata != None
@@ -1660,6 +1665,11 @@ def construct_arguments(
 
     if hasattr(ctx.attr, "_extra_exec_rustc_env") and is_exec_configuration(ctx):
         env.update(ctx.attr._extra_exec_rustc_env[ExtraExecRustcEnvInfo].extra_exec_rustc_env)
+
+    if toolchain._bootstrapping and remap_path_prefix != None:
+        # -Zremap-cwd-prefix is unstable. Respect explicit RUSTC_BOOTSTRAP values;
+        # otherwise limit the opt-in to this bootstrap crate.
+        env.setdefault("RUSTC_BOOTSTRAP", ctx.configuration.default_shell_env.get("RUSTC_BOOTSTRAP", crate_info.name))
 
     # Strip any `-Zallow-features=` entries out of the toolchain's extra
     # rustc flags into `all_allowed_unstable_features` and, when
@@ -2163,6 +2173,8 @@ def rustc_compile(
         use_json_output = bool(build_metadata) or bool(rustc_output) or bool(rustc_rmeta_output),
         skip_expanding_rustc_env = skip_expanding_rustc_env,
         require_explicit_unstable_features = require_explicit_unstable_features,
+        # _spawnvp in bootstrap_process_wrapper does not preserve embedded
+        # quotes in direct Windows arguments. rustc reads them from a response file.
         always_use_param_file = rust_toolchain._bootstrapping,
         inject_allow_features_guardrail = inject_allow_features_guardrail,
         allowed_unstable_rust_features = allowed_unstable_rust_features,

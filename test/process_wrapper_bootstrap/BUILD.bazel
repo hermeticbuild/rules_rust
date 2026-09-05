@@ -1,4 +1,20 @@
 load("//rust:defs.bzl", "rust_binary", "rust_test")
+load(":bootstrap_tinyjson.bzl", "bootstrap_tinyjson")
+
+bootstrap_tinyjson(
+    name = "bootstrap_tinyjson",
+)
+
+rust_test(
+    name = "bootstrap_reproducibility_test",
+    srcs = ["bootstrap_reproducibility_test.rs"],
+    data = [":bootstrap_tinyjson"],
+    edition = "2021",
+    env = {
+        "BOOTSTRAP_TINYJSON_RLOCATIONPATH": "$(rlocationpath :bootstrap_tinyjson)",
+    },
+    deps = ["//rust/runfiles"],
+)
 
 rust_binary(
     name = "bootstrap_process_wrapper_probe",
