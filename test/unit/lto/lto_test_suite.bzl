@@ -3,6 +3,8 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_library_group", "rust_proc_macro")
 load(
@@ -13,6 +15,7 @@ load(
     "assert_argv_contains_prefix",
     "assert_argv_contains_prefix_not",
 )
+load(":shared_backends_toolchain.bzl", "shared_backends_toolchain")
 
 _ALLOCATOR_LIBRARIES_SETTING = str(Label("//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols"))
 _CC_COMMON_LINK_SETTING = str(Label("//rust/settings:experimental_use_cc_common_link"))
@@ -31,6 +34,14 @@ _RULE_FEATURE_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
 _GLOBAL_ALLOCATOR_THIN_LTO_CONFIG_SETTINGS = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
     _CC_COMMON_LINK_SETTING: True,
     _GLOBAL_ALLOCATOR_SETTING: True,
+}
+_SHARED_BACKENDS_CONFIG_SETTINGS = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
+    "//command_line_option:extra_toolchains": [str(Label(":shared_backends_cc_toolchain"))],
+    "//command_line_option:features": [
+        "thin_lto",
+        "thin_lto_linkstatic_tests_use_shared_nonlto_backends",
+    ],
+    "//command_line_option:force_pic": True,
 }
 
 _DepActionsInfo = provider(
@@ -237,6 +248,69 @@ _distributed_thin_lto_cc_binary_test = analysistest.make(
     config_settings = _RULE_FEATURE_THIN_LTO_CONFIG_SETTINGS,
 )
 
+def _distributed_thin_lto_shared_backends(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    link_actions = [action for action in target.actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(link_actions))
+    asserts.false(env, any([action.mnemonic == "CppLTOIndexing" for action in target.actions]))
+    rust_backends = [
+        action
+        for action in target.actions
+        if action.mnemonic == "CcLtoBackendCompile"
+        if any([file.basename.startswith("libdistributed_lib-") for file in action.inputs.to_list()])
+    ]
+    asserts.equals(env, [], rust_backends)
+    if link_actions:
+        shared_objects = [
+            file
+            for file in link_actions[0].inputs.to_list()
+            if "shared.nonlto" in file.path and file.basename.startswith("libdistributed_lib-")
+        ]
+        asserts.equals(env, 1, len(shared_objects))
+
+    return analysistest.end(env)
+
+_distributed_thin_lto_shared_backends_test = analysistest.make(
+    _distributed_thin_lto_shared_backends,
+    config_settings = _SHARED_BACKENDS_CONFIG_SETTINGS,
+)
+
+_distributed_thin_lto_all_shared_backends_test = analysistest.make(
+    _distributed_thin_lto_shared_backends,
+    config_settings = _SHARED_BACKENDS_CONFIG_SETTINGS | {
+        "//command_line_option:features": [
+            "thin_lto",
+            "thin_lto_all_linkstatic_use_shared_nonlto_backends",
+        ],
+    },
+)
+
+def _distributed_thin_lto_library_shared_backend(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    rustc = [action for action in target.actions if action.mnemonic == "Rustc"][0]
+    assert_argv_contains(env, rustc, "-Clinker-plugin-lto")
+    bitcode = [file for file in rustc.outputs.to_list() if file.basename.endswith(".rlib.o")]
+    asserts.equals(env, 1, len(bitcode))
+    backends = [action for action in target.actions if action.mnemonic == "CcLtoBackendCompile"]
+    asserts.equals(env, 1, len(backends))
+    if backends:
+        assert_argv_contains(env, backends[0], "-fPIC")
+        asserts.true(env, bitcode[0] in backends[0].inputs.to_list())
+        asserts.false(env, any([
+            file.basename.endswith((".imports", ".thinlto.bc"))
+            for file in backends[0].inputs.to_list()
+        ]))
+        asserts.true(env, any(["shared.nonlto" in file.path for file in backends[0].outputs.to_list()]))
+
+    return analysistest.end(env)
+
+_distributed_thin_lto_library_shared_backend_test = analysistest.make(
+    _distributed_thin_lto_library_shared_backend,
+    config_settings = _SHARED_BACKENDS_CONFIG_SETTINGS,
+)
+
 def _distributed_thin_lto_requires_allocator_setting(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "distributed ThinLTO requires --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols")
@@ -316,6 +390,8 @@ def lto_test_suite(name):
     Args:
         name (str): The name of the test suite.
     """
+    shared_backends_toolchain(name = "shared_backends_cc_toolchain")
+
     write_file(
         name = "crate_lib",
         out = "lib.rs",
@@ -447,6 +523,28 @@ def lto_test_suite(name):
         tags = ["manual"],
     )
 
+    cc_library(
+        name = "distributed_cc_lib",
+        deps = [":distributed_lib"],
+        tags = ["manual"],
+    )
+
+    cc_test(
+        name = "distributed_cc_static_test",
+        srcs = [":main.cc"],
+        deps = [":distributed_cc_lib"],
+        linkstatic = True,
+        tags = ["manual"],
+    )
+
+    cc_binary(
+        name = "distributed_cc_static_bin",
+        srcs = [":main.cc"],
+        deps = [":distributed_cc_lib"],
+        linkstatic = True,
+        tags = ["manual"],
+    )
+
     _with_exec_cfg(
         name = "distributed_bin_exec",
         target = ":distributed_bin",
@@ -503,6 +601,21 @@ def lto_test_suite(name):
         target_under_test = ":distributed_cc_bin",
     )
 
+    _distributed_thin_lto_shared_backends_test(
+        name = "distributed_thin_lto_shared_backends_test",
+        target_under_test = ":distributed_cc_static_test",
+    )
+
+    _distributed_thin_lto_all_shared_backends_test(
+        name = "distributed_thin_lto_all_shared_backends_test",
+        target_under_test = ":distributed_cc_static_bin",
+    )
+
+    _distributed_thin_lto_library_shared_backend_test(
+        name = "distributed_thin_lto_library_shared_backend_test",
+        target_under_test = ":distributed_lib",
+    )
+
     _distributed_thin_lto_requires_allocator_setting_test(
         name = "distributed_thin_lto_requires_allocator_setting_test",
         target_under_test = ":distributed_bin",
@@ -546,6 +659,9 @@ def lto_test_suite(name):
             ":distributed_thin_lto_binary_test",
             ":distributed_thin_lto_global_allocator_test",
             ":distributed_thin_lto_cc_binary_test",
+            ":distributed_thin_lto_shared_backends_test",
+            ":distributed_thin_lto_all_shared_backends_test",
+            ":distributed_thin_lto_library_shared_backend_test",
             ":distributed_thin_lto_requires_allocator_setting_test",
             ":thin_lto_feature_overrides_manual_lto_setting_test",
             ":wasm_thin_lto_binary_test",
