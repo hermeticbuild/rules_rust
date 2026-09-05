@@ -15,6 +15,17 @@ bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "28.3", repo_name = "com_google_protobuf")
 bazel_dep(name = "rules_cc", version = "0.2.4")
+
+# Backport rules_cc commit 4591082affa5a63f4f06942e14ea69984bb68ed0
+# until a release contains the PIC backend fix needed by the LTO tests.
+# Overrides apply only when rules_rust is the root module.
+single_version_override(
+    module_name = "rules_cc",
+    patch_strip = 1,
+    patches = ["//test/unit/lto:rules_cc_pic_shared_backends.patch"],
+    version = "0.2.18",
+)
+
 bazel_dep(name = "rules_license", version = "1.0.0")
 bazel_dep(name = "rules_proto", version = "7.1.0")
 bazel_dep(name = "rules_python", version = "1.6.3")

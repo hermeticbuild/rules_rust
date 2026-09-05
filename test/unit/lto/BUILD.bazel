@@ -1,5 +1,7 @@
 load(":lto_test_suite.bzl", "lto_test_suite")
 
+exports_files(["rules_cc_pic_shared_backends.patch"])
+
 lto_test_suite(
     name = "lto_test_suite",
 )
