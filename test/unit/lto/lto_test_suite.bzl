@@ -22,12 +22,9 @@ _LLVM_LINUX_CONFIG_SETTINGS = {
     "//command_line_option:platforms": [str(Label("@llvm//platforms:linux_x86_64"))],
 }
 _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
-    _ALLOCATOR_LIBRARIES_SETTING: True,
     "//command_line_option:features": ["thin_lto"],
 }
-_RULE_FEATURE_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS | {
-    _ALLOCATOR_LIBRARIES_SETTING: True,
-}
+_RULE_FEATURE_THIN_LTO_CONFIG_SETTINGS = _LLVM_LINUX_CONFIG_SETTINGS
 _GLOBAL_ALLOCATOR_THIN_LTO_CONFIG_SETTINGS = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
     _CC_COMMON_LINK_SETTING: True,
     _GLOBAL_ALLOCATOR_SETTING: True,
@@ -246,6 +243,7 @@ _distributed_thin_lto_requires_allocator_setting_test = analysistest.make(
     _distributed_thin_lto_requires_allocator_setting,
     expect_failure = True,
     config_settings = _LLVM_LINUX_CONFIG_SETTINGS | {
+        _ALLOCATOR_LIBRARIES_SETTING: False,
         "//command_line_option:features": ["thin_lto"],
     },
 )

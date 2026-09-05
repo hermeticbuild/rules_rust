@@ -4,7 +4,6 @@
 
 build --@rules_rust//rust/settings:experimental_use_cc_common_link=True
 build --@rules_rust//rust/settings:experimental_use_global_allocator=True
-build --@rules_rust//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols=True
 
 ###############################################################################
 

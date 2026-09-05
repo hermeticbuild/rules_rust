@@ -62,3 +62,23 @@ cc_test(
     ],
     deps = [":cdylib"],
 )
+
+rust_library(
+    name = "allocator_ffi",
+    srcs = ["allocator_ffi.rs"],
+    edition = "2021",
+)
+
+cc_test(
+    name = "allocator_ffi_test",
+    srcs = ["allocator_ffi_test.cc"],
+    deps = [":allocator_ffi"],
+)
+
+rust_test(
+    name = "allocator_attribute_test",
+    srcs = ["allocator_ffi.rs"],
+    edition = "2021",
+    experimental_use_cc_common_link = 1,
+    visibility = ["//unit:__pkg__"],
+)

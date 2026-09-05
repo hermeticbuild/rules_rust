@@ -117,6 +117,29 @@ def _use_cc_common_link_test(ctx):
 
 use_cc_common_link_test = analysistest.make(_use_cc_common_link_test, attrs = {"expect_pdb": attr.bool()})
 
+def _cc_common_link_attribute_test(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    link_actions = [action for action in target.actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(link_actions))
+    if link_actions:
+        asserts.true(
+            env,
+            any([
+                "ffi/rs/allocator_library/" in file.short_path and file.extension in ("a", "lib")
+                for file in link_actions[0].inputs.to_list()
+            ]),
+            "Expected the Rust allocator library when experimental_use_cc_common_link = 1",
+        )
+    return analysistest.end(env)
+
+cc_common_link_attribute_test = analysistest.make(
+    _cc_common_link_attribute_test,
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:experimental_use_cc_common_link")): False,
+    },
+)
+
 def _bpf_linker_ignores_cc_args_test(ctx):
     env = analysistest.begin(ctx)
     registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
@@ -271,6 +294,11 @@ def _cc_common_link_test_targets():
         target_under_test = ":bin_with_collect_dep_actions",
     )
 
+    cc_common_link_attribute_test(
+        name = "cc_common_link_attribute_test",
+        target_under_test = "//:allocator_attribute_test",
+    )
+
     return [
         "use_cc_common_link_on_binary",
         "use_cc_common_link_on_binary_with_pdb",
@@ -279,6 +307,7 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
         "bpf_linker_ignores_cc_args_test",
+        "cc_common_link_attribute_test",
     ]
 
 _RUSTC_FLAGS_CODEGEN_UNITS = 2
@@ -385,7 +414,7 @@ def _codegen_units_test_targets():
         rust_doc = ":mock_rustdoc",
         rust_std = ":std_libs",
         rustc = ":mock_rustc",
-        process_wrapper = "@rules_rust//util/process_wrapper",
+        process_wrapper = "@rules_rust//util/process_wrapper:bootstrap_process_wrapper",
         linker = ":mock_rust-lld",
         linker_type = "direct",
         staticlib_ext = ".a",
