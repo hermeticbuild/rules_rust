@@ -89,13 +89,33 @@ def _rlib_provides_cc_info_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
 
-    count = 4
-    if _is_windows(env.ctx):
-        count -= 1
-    if ctx.attr._experimental_use_allocator_libraries_with_mangled_symbols[BuildSettingInfo].value:
-        count -= 1
+    count = 3
+    if not _is_windows(env.ctx) and not ctx.attr._experimental_use_allocator_libraries_with_mangled_symbols[BuildSettingInfo].value:
+        count += 1
 
     _assert_cc_info_has_library_to_link(env, tut, "rlib", count)
+    return analysistest.end(env)
+
+def _rlib_allocator_libraries_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    allocator_labels = [
+        Label("//ffi/rs/allocator_library:allocator_library"),
+        Label("//ffi/cc/allocator_library:cc_allocator_library"),
+    ]
+    allocator_libraries = depset([
+        archive.owner
+        for linker_input in tut[CcInfo].linking_context.linker_inputs.to_list()
+        for library in linker_input.libraries
+        for archive in [library.static_library, library.pic_static_library]
+        if archive != None and archive.owner in allocator_labels
+    ]).to_list()
+    asserts.equals(
+        env,
+        [Label(label) for label in ctx.attr.expected_allocator_libraries],
+        allocator_libraries,
+        "rust_library CcInfo should contain the selected allocator archives",
+    )
     return analysistest.end(env)
 
 def _rlib_with_dep_only_has_stdlib_linkflags_once_test_impl(ctx):
@@ -158,6 +178,17 @@ rlib_provides_cc_info_test = analysistest.make(
             default = Label("//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols"),
         ),
         "_windows": attr.label(default = Label("@platforms//os:windows")),
+    },
+)
+rlib_allocator_libraries_test = analysistest.make(
+    _rlib_allocator_libraries_test_impl,
+    attrs = {"expected_allocator_libraries": attr.string_list()},
+)
+rlib_cc_allocator_libraries_test = analysistest.make(
+    _rlib_allocator_libraries_test_impl,
+    attrs = {"expected_allocator_libraries": attr.string_list()},
+    config_settings = {
+        str(Label("//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols")): False,
     },
 )
 rlib_with_dep_only_has_stdlib_linkflags_once_test = analysistest.make(
@@ -360,6 +391,21 @@ def _cc_info_test():
         name = "rlib_provides_cc_info_test",
         target_under_test = ":rlib",
     )
+    rlib_allocator_libraries_test(
+        name = "rlib_uses_rust_allocator_by_default_test",
+        target_under_test = ":rlib",
+        expected_allocator_libraries = [str(Label("//ffi/rs/allocator_library:allocator_library"))],
+    )
+    rlib_cc_allocator_libraries_test(
+        name = "rlib_uses_cc_allocator_when_disabled_test",
+        target_under_test = ":rlib",
+        expected_allocator_libraries = select({
+            "@platforms//os:none": [],
+            "@platforms//os:wasi": [],
+            "@platforms//os:windows": [],
+            "//conditions:default": [str(Label("//ffi/cc/allocator_library:cc_allocator_library"))],
+        }),
+    )
     rlib_with_dep_only_has_stdlib_linkflags_once_test(
         name = "rlib_with_dep_only_has_stdlib_linkflags_once_test",
         target_under_test = ":rlib_with_dep",
@@ -524,6 +570,8 @@ def cc_info_test_suite(name):
         name = name,
         tests = [
             ":rlib_provides_cc_info_test",
+            ":rlib_uses_rust_allocator_by_default_test",
+            ":rlib_uses_cc_allocator_when_disabled_test",
             ":rlib_with_dep_only_has_stdlib_linkflags_once_test",
             ":staticlib_provides_cc_info_test",
             ":cdylib_provides_cc_info_test",

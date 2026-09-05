@@ -766,7 +766,8 @@ rust_toolchain = rule(
                 "Whether to use rust-based allocator libraries with " +
                 "mangled symbols. Possible values: [-1, 0, 1]. " +
                 "-1 means to use the value of the build setting " +
-                "//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols. " +
+                "//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols " +
+                "(enabled by default). " +
                 "0 means do not use. In that case, rules_rust will try to use " +
                 "the c-based allocator libraries that don't support symbol mangling. " +
                 "1 means use the rust-based allocator libraries."

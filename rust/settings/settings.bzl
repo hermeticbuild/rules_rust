@@ -181,19 +181,23 @@ def experimental_use_global_allocator():
 
 def experimental_use_allocator_libraries_with_mangled_symbols(
         name = "experimental_use_allocator_libraries_with_mangled_symbols"):
-    """A flag used to select allocator libraries implemented in rust that are compatible with the rustc allocator symbol mangling.
-
-    The symbol mangling mechanism relies on unstable language features and requires a nightly rustc from 2025-04-05 or later.
+    """Use Rust allocator libraries that match rustc's allocator symbols (enabled by default).
 
     Rustc generates references to internal allocator symbols when building rust
     libraries.  At link time, rustc generates the definitions of these symbols.
     When rustc is not used as the final linker, we need to generate the
     definitions ourselves.  This happens for example when a rust_library is
-    used as a dependency of a rust_binary, or when the
+    used as a dependency of a cc_binary, or when the
     experimental_use_cc_common_link setting is used.
 
+    The default allocator library is an empty staticlib. Rustc generates its
+    allocator symbols, so it works with stable Rust and with both mangled and
+    unmangled symbols. The global allocator library uses unstable language
+    features and requires a compatible nightly rustc from 2025-04-05 or later.
 
-    For older versions of rustc, the allocator symbol definitions can be provided
+    Set this flag to false, or set the rust_toolchain attribute of the same name
+    to 0, to use custom or legacy C++ allocator libraries instead. For older
+    versions of rustc, the allocator symbol definitions can be provided
     via the `rust_toolchain`'s `allocator_library` or `global_allocator_library`
     attributes, with sample targets like `@rules_rust//ffi/cc/allocator_library`
     and `@rules_rust//ffi/cc/global_allocator_library`.
@@ -222,7 +226,7 @@ def experimental_use_allocator_libraries_with_mangled_symbols(
     """
     bool_flag(
         name = name,
-        build_setting_default = False,
+        build_setting_default = True,
     )
 
     native.config_setting(
