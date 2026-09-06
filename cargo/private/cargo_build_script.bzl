@@ -531,7 +531,10 @@ def _cargo_build_script_impl(ctx):
     # Pull in env vars which may be required for the cc_toolchain to work (e.g. on OSX, the SDK version).
     # We hope that the linker env is sufficient for the whole cc_toolchain.
     if use_cc_toolchain:
-        cc_toolchain, feature_configuration = find_cc_toolchain(ctx)
+        # Build-script native objects are opaque to Bazel: no per-object LTO
+        # backend actions can be registered for them. Keep them as machine code
+        # when the Rust link uses distributed ThinLTO.
+        cc_toolchain, feature_configuration = find_cc_toolchain(ctx, ["thin_lto"])
     else:
         cc_toolchain, feature_configuration = None, None
     linker, _, link_args, linker_env = get_linker_and_args(ctx, "bin", toolchain, cc_toolchain, feature_configuration, None)

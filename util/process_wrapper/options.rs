@@ -36,6 +36,10 @@ pub(crate) struct Options {
     pub(crate) child_environment: HashMap<String, String>,
     // Compiler outputs checked for an embedded absolute working directory.
     pub(crate) check_output_for_working_dir: Vec<String>,
+    // Capture rustc's ELF cdylib export script instead of performing its link.
+    pub(crate) rustc_cdylib_export_file: Option<String>,
+    pub(crate) rustc_cdylib_symbols_file: Option<String>,
+    pub(crate) rustc_cdylib_native_dir: Option<String>,
     // If set, create the specified file after the child process successfully
     // terminated its execution.
     pub(crate) touch_file: Option<String>,
@@ -65,6 +69,9 @@ pub(crate) fn options() -> Result<Options, OptionError> {
     let mut out_dir_raw = None;
     let mut arg_file_raw = None;
     let mut check_output_for_working_dir_raw = None;
+    let mut rustc_cdylib_export_file = None;
+    let mut rustc_cdylib_symbols_file = None;
+    let mut rustc_cdylib_native_dir = None;
     let mut touch_file = None;
     let mut copy_output_raw = None;
     let mut stdout_file = None;
@@ -101,6 +108,21 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         "--check-output-for-working-dir",
         "Compiler output(s) checked for an embedded absolute working directory.",
         &mut check_output_for_working_dir_raw,
+    );
+    flags.define_flag(
+        "--rustc-cdylib-export-file",
+        "Preserve rustc's ELF export script for a separate cc_common.link action.",
+        &mut rustc_cdylib_export_file,
+    );
+    flags.define_flag(
+        "--rustc-cdylib-symbols-file",
+        "Preserve rustc's synthetic object that roots dependency exports.",
+        &mut rustc_cdylib_symbols_file,
+    );
+    flags.define_flag(
+        "--rustc-cdylib-native-dir",
+        "Preserve native archives rustc extracts from dependency rlibs.",
+        &mut rustc_cdylib_native_dir,
     );
     flags.define_flag(
         "--touch-file",
@@ -302,6 +324,9 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         working_dir: current_dir,
         child_environment: vars,
         check_output_for_working_dir: check_output_for_working_dir_raw.unwrap_or_default(),
+        rustc_cdylib_export_file,
+        rustc_cdylib_symbols_file,
+        rustc_cdylib_native_dir,
         touch_file,
         copy_output,
         stdout_file,

@@ -966,7 +966,10 @@ def _will_emit_object_file(emit):
 def _supports_distributed_thin_lto(ctx, toolchain, crate_info):
     """Whether `crate_info` can participate in distributed ThinLTO."""
     return (
-        crate_info.type in ("bin", "lib", "rlib") and
+        (
+            crate_info.type in ("bin", "lib", "rlib") or
+            (crate_info.type == "cdylib" and toolchain.target_os == "linux")
+        ) and
         toolchain.target_arch not in ("wasm32", "wasm64") and
         not toolchain._bootstrapping and
         not is_no_std(ctx, toolchain, crate_info.is_test)
@@ -974,6 +977,11 @@ def _supports_distributed_thin_lto(ctx, toolchain, crate_info):
 
 def _remove_codegen_units(flag):
     return None if flag.startswith("-Ccodegen-units") else flag
+
+def _cdylib_native_link_args(file):
+    if file.basename.split("-")[1] == "whole":
+        return ["-Wl,--whole-archive", file.path, "-Wl,--no-whole-archive"]
+    return [file.path]
 
 def _should_add_oso_prefix(toolchain):
     """Whether to add -oso_prefix to strip absolute paths from N_OSO entries.
@@ -1443,6 +1451,12 @@ def construct_arguments(
 
     if linker_plugin_lto:
         rustc_flags.add("-Clinker-plugin-lto")
+        if crate_info.type in ("lib", "rlib"):
+            # Preserve bundled native archives as separate linker inputs when
+            # the Rust object is replaced by a distributed LTO backend output.
+            rustc_flags.add("-Zpacked-bundled-libs")
+            if inject_allow_features_guardrail:
+                rustc_flags.add("-Zallow-features=")
     else:
         rustc_flags.add_all(construct_lto_arguments(ctx, toolchain, crate_info))
     _add_codegen_units_flags(toolchain, emit, rustc_flags)
@@ -2011,8 +2025,9 @@ def rustc_compile(
             ).format(ctx.label),
         )
     use_cc_common_link = experimental_use_cc_common_link or (
-        distributed_thin_lto and crate_info.type == "bin"
+        distributed_thin_lto and crate_info.type in ("bin", "cdylib")
     )
+    packed_bundled_libs = distributed_thin_lto and crate_info.type in ("lib", "rlib")
 
     scan_msvc_archive_object = (
         rust_toolchain.target_abi == "msvc" and
@@ -2070,8 +2085,24 @@ def rustc_compile(
     # Metadata is emitted by a separate -Zno-codegen action. The full action
     # emits the linked crate unless cc_common.link does, and emits output_o
     # when output_o is declared.
+    cdylib_export_file = None
+    cdylib_symbols_file = None
+    cdylib_native_dir = None
+    cdylib_native_params = None
+    if distributed_thin_lto and crate_info.type == "cdylib":
+        # Keep rustc's ELF export policy and symbol roots while delegating code
+        # generation and the actual shared link to the C++ toolchain.
+        cdylib_export_file = ctx.actions.declare_file(crate_info.output.basename + ".exports", sibling = crate_info.output)
+        cdylib_symbols_file = ctx.actions.declare_file(crate_info.output.basename + ".symbols.o", sibling = crate_info.output)
+        cdylib_native_dir = ctx.actions.declare_directory(crate_info.output.basename + ".native", sibling = crate_info.output)
+        cdylib_native_params = ctx.actions.declare_file(crate_info.output.basename + ".native.params", sibling = crate_info.output)
+        native_args = ctx.actions.args()
+        native_args.add_all([cdylib_native_dir], map_each = _cdylib_native_link_args)
+        native_args.set_param_file_format("shell")
+        ctx.actions.write(output = cdylib_native_params, content = native_args)
+
     emit = []
-    if not use_cc_common_link:
+    if not use_cc_common_link or cdylib_export_file:
         emit.append("link")
     if output_o:
         emit.append(("obj", output_o))
@@ -2184,6 +2215,11 @@ def rustc_compile(
     )
 
     args_metadata = None
+    if cdylib_export_file:
+        args.process_wrapper_flags.add("--rustc-cdylib-export-file", cdylib_export_file)
+        args.process_wrapper_flags.add("--rustc-cdylib-symbols-file", cdylib_symbols_file)
+        args.process_wrapper_flags.add_all([cdylib_native_dir], before_each = "--rustc-cdylib-native-dir", expand_directories = False)
+
     if build_metadata:
         metadata_emit = ["link"]
         args_metadata, _ = construct_arguments(
@@ -2221,8 +2257,9 @@ def rustc_compile(
     # this is the final list of env vars
     env.update(env_from_args)
 
-    if build_metadata and inject_allow_features_guardrail:
-        # RUSTC_BOOTSTRAP=1 is required for -Zno-codegen on stable/beta rustc, and
+    if (build_metadata or packed_bundled_libs) and inject_allow_features_guardrail:
+        # RUSTC_BOOTSTRAP=1 is required for -Zno-codegen and
+        # -Zpacked-bundled-libs on stable/beta rustc, and
         # must be set on both the metadata and full actions for SVH compatibility
         # (since RUSTC_BOOTSTRAP affects the crate hash). Skipped on nightly
         # toolchains (where -Zno-codegen works without bootstrap) and when the
@@ -2247,6 +2284,8 @@ def rustc_compile(
 
     # The action might generate extra output that we don't want to include in the `DefaultInfo` files.
     action_outputs = list(outputs)
+    if cdylib_export_file:
+        action_outputs.extend([cdylib_export_file, cdylib_symbols_file, cdylib_native_dir])
     if output_o and output_o not in action_outputs:
         action_outputs.append(output_o)
     if rustc_output:
@@ -2360,8 +2399,9 @@ def rustc_compile(
         # Wrap the main `.o` file into a compilation output suitable for
         # cc_common.link. The main `.o` file is useful in both PIC and non-PIC
         # modes.
-        cco_args["objects"] = depset([output_o])
-        cco_args["pic_objects"] = depset([output_o])
+        link_objects = [output_o] + ([cdylib_symbols_file] if cdylib_symbols_file else [])
+        cco_args["objects"] = depset(link_objects)
+        cco_args["pic_objects"] = depset(link_objects)
         if distributed_thin_lto:
             cco_args["lto_compilation_context"] = cc_common.create_lto_compilation_context(
                 objects = {
@@ -2457,6 +2497,8 @@ def rustc_compile(
             output_type = "executable" if crate_info.type == "bin" else "dynamic_library",
             additional_outputs = additional_linker_outputs,
             variables_extension = variables_extension,
+            additional_inputs = [cdylib_export_file, cdylib_native_params, cdylib_native_dir] if cdylib_export_file else [],
+            user_link_flags = ["-Wl,--version-script=" + cdylib_export_file.path, "@" + cdylib_native_params.path] if cdylib_export_file else [],
         )
 
         if rust_toolchain.target_os == "linux" and cc_helper.should_create_per_object_debug_info(feature_configuration, ctx.fragments.cpp):

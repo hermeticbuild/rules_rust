@@ -1,6 +1,7 @@
 """PyO3 Toolchains"""
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_common")
 
 PYO3_TOOLCHAIN = "//extensions/pyo3:toolchain_type"
@@ -209,6 +210,9 @@ def _current_rust_pyo3_toolchain_impl(ctx):
     if rust_common.crate_group_info in target:
         providers.append(target[rust_common.crate_group_info])
 
+    if CcInfo in target:
+        providers.append(target[CcInfo])
+
     return providers
 
 current_rust_pyo3_toolchain = rule(
@@ -242,6 +246,9 @@ def _current_rust_pyo3_introspection_toolchain_impl(ctx):
 
     if rust_common.crate_group_info in target:
         providers.append(target[rust_common.crate_group_info])
+
+    if CcInfo in target:
+        providers.append(target[CcInfo])
 
     return providers
 
