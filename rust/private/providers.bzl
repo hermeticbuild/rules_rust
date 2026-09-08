@@ -22,6 +22,10 @@ CrateInfo = provider(
             "List[str]: The set of enabled cfgs for this crate. Note that this field is populated only " +
             "when @rules_rust//rust/settings:collect_cfgs is set."
         ),
+        "crate_identity": (
+            "RustCrateIdentityInfo, optional: The logical Rust library identity and configured crate " +
+            "instance, if this target carries one. Absent for ordinary handwritten targets."
+        ),
         "compile_data": "depset[File]: Compile data required by this crate.",
         "compile_data_targets": "depset[Label]: Compile data targets required by this crate.",
         "data": "depset[File]: Runtime data associated with the target. Not passed to `Rustc` actions, except for `proc-macro` targets where `Rustc` is the runtime.",
@@ -68,6 +72,47 @@ DepInfo = provider(
         "transitive_metadata_outputs": "depset[File]: All transitive metadata dependencies (.rmeta, for crates that provide them) and all transitive object dependencies (.rlib) for crates that don't provide metadata.",
         "transitive_noncrates": "depset[LinkerInput]: All transitive dependencies that aren't crates.",
         "transitive_proc_macro_data": "depset[File]: Data of all transitive proc-macro dependencies, and non-macro dependencies of those macros.",
+    },
+)
+
+RustCrateIdentityInfo = provider(
+    doc = (
+        "The logical identity of a Rust library together with the specific configured crate " +
+        "instance that implements it.\n\n" +
+        "`logical_id` answers \"does this represent the same logical upstream Rust library?\" " +
+        "For generated Cargo libraries the logical identity is source-qualified: it encodes the " +
+        "Cargo source/provenance as well as name and version. Two instances with the same name " +
+        "and version but different sources (e.g. crates.io vs a private registry) therefore have " +
+        "different logical identities and are treated as distinct libraries; cross-registry " +
+        "duplication is accepted by design so a private registry may shadow a common name. The " +
+        "enforced invariant is per identity: within one native link unit there may be at most " +
+        "one configured crate instance for each source-qualified logical identity.\n\n" +
+        "The `crate_instance` artifact answers \"is this actually the same compiled instance?\" " +
+        "Equality of `crate_instance` means the same configured compilation output; target " +
+        "configuration, enabled features, cfgs, toolchain, transitions, and recursively selected " +
+        "dependencies are already reflected in the configured action that owns that artifact. " +
+        "Different artifacts are conservatively treated as different instances even if their " +
+        "bytes or compilation flags happen to match.\n\n" +
+        "`owner` and `display_name` are diagnostic-only fields and do not participate in equality."
+    ),
+    fields = {
+        "logical_id": "str: Source-qualified logical identity of the upstream Rust library whose runtime/type identity should be unique per link unit.",
+        "crate_instance": "File: The configured crate output artifact (CrateInfo.output).",
+        "owner": "Label: The label of the target that produced the crate only for diagnostics.",
+        "display_name": "str: Short human-readable description for diagnostics only.",
+    },
+)
+
+RustLinkClosureInfo = provider(
+    doc = (
+        "The Rust library identity closure absorbed into a native-boundary artifact.\n\n" +
+        "A native consumer may fold a `static` closure into its own link unit. A `dynamic` " +
+        "artifact is independently linked and its internal Rust crates must not be combined with " +
+        "a consuming unit's closure."
+    ),
+    fields = {
+        "crates": "depset[RustCrateIdentityInfo]: The Rust library identity closure.",
+        "linkage": "str: 'static' or 'dynamic'.",
     },
 )
 

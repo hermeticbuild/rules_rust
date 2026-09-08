@@ -43,6 +43,8 @@ load(
     "UnstableRustFeaturesInfo",
     _BuildInfo = "BuildInfo",
 )
+load(":rust_crate_identity.bzl", "validate_crate_identity_closure")
+load(":rust_link_validation.bzl", "RustLinkAggregationInfo")
 load(":rustc_resource_set.bzl", "get_rustc_resource_set", "is_codegen_units_enabled")
 load(":stamp.bzl", "is_stamping_enabled")
 load(
@@ -179,6 +181,70 @@ def _are_linkstamps_supported(feature_configuration):
 
 def _is_proc_macro(crate_info):
     return "proc-macro" in (crate_info.type, crate_info.wrapped_crate_type)
+
+def _is_terminal_link_unit(crate_info):
+    """Whether this crate type finalizes a link unit (vs. being linked into one)."""
+    if crate_info.is_test:
+        return True
+    return crate_info.type in ("bin", "cdylib", "dylib", "staticlib", "proc-macro")
+
+def _linkage_for(crate_info):
+    """The native linkage reported by a library target's RustLinkClosureInfo.
+
+    A shared (cdylib/dylib) artifact is an independent dynamic link boundary and
+    must not have its internal Rust closure folded into a consumer's closure.
+    """
+    if crate_info.type in ("cdylib", "dylib"):
+        return "dynamic"
+    return "static"
+
+def _crate_identity_for(ctx, crate_info_dict):
+    """Builds the RustCrateIdentityInfo for the current crate, or None.
+
+    `crate_instance` is the configured output artifact (CrateInfo.output);
+    target configuration, features, cfgs, toolchain, transitions, and
+    recursively selected dependencies are all already reflected in the
+    configured action that owns that artifact.
+    """
+    logical_id = getattr(ctx.attr, "crate_identity", "")
+    if not logical_id:
+        return None
+    return rust_common.rust_crate_identity_info(
+        logical_id = logical_id,
+        crate_instance = crate_info_dict["output"],
+        owner = ctx.label,
+        display_name = crate_info_dict["name"],
+    )
+
+def _link_closure_identities(crate_info, dep_info):
+    """Returns the Rust library identity records in this crate's static closure.
+
+    proc-macro implementation crates are host units: they must not be folded
+    into a target-runtime closure. `dep_info.transitive_crates` includes them
+    (they land in `direct_crates`), so filter them out here.
+    """
+    identities = []
+    own = crate_info.crate_identity
+    if own != None:
+        identities.append(own)
+    for linked_crate in dep_info.transitive_crates.to_list():
+        if _is_proc_macro(linked_crate):
+            continue
+        identity = getattr(linked_crate, "crate_identity", None)
+        if identity != None:
+            identities.append(identity)
+    return identities
+
+def _native_link_closure_identities(ctx):
+    """Returns Rust identities recovered through target-runtime native edges."""
+    identities = []
+    for attr_name in ("deps", "link_deps"):
+        if not hasattr(ctx.attr, attr_name):
+            continue
+        for dep in getattr(ctx.attr, attr_name):
+            if RustLinkAggregationInfo in dep:
+                identities.extend(dep[RustLinkAggregationInfo].crates.to_list())
+    return identities
 
 def collect_deps(
         deps,
@@ -2599,7 +2665,9 @@ def rustc_compile(
         # ctx.configuration.default_shell_env, which must not leak through
         # CrateInfo -- it would otherwise clobber cc_toolchain link_env in
         # downstream rust_test(crate = ...) (see bazelbuild/rules_rust#3989).
+        crate_identity = _crate_identity_for(ctx, crate_info_dict)
         crate_info_dict.update({
+            "crate_identity": crate_identity,
             "rustc_env": env_from_args,
         })
         crate_info = rust_common.create_crate_info(
@@ -2638,6 +2706,28 @@ def rustc_compile(
         debug_context = debug_context,
         lto_object = output_o if distributed_thin_lto else None,
     )
+
+    # The static Rust identity closure absorbed by this crate. Reused for the
+    # intrinsic link-unit validator below and for the native-boundary provider,
+    # so there is only one approximation of Rust dependency filtering.
+    link_identities = _link_closure_identities(crate_info, dep_info)
+    link_identities.extend(_native_link_closure_identities(ctx))
+
+    # Enforce the per-link-unit invariant during analysis. Analysis failure
+    # prevents the invalid configured target's actions from becoming executable.
+    if _is_terminal_link_unit(crate_info):
+        validate_crate_identity_closure(ctx.label, link_identities)
+
+    # Export the native-boundary closure for Rust targets that expose CcInfo so
+    # a downstream native (C/C++) linking aspect can fold it. Terminal link
+    # units (binaries, tests, proc macros) do not need to export it.
+    if crate_info.type in ("rlib", "lib", "staticlib", "cdylib", "dylib"):
+        providers.append(
+            rust_common.rust_link_closure_info(
+                crates = depset(link_identities),
+                linkage = _linkage_for(crate_info),
+            ),
+        )
 
     output_group_info = {}
 

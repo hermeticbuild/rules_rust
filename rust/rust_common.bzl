@@ -27,6 +27,8 @@ load(
     _CrateInfo = "CrateInfo",
     _DepInfo = "DepInfo",
     _DepVariantInfo = "DepVariantInfo",
+    _RustCrateIdentityInfo = "RustCrateIdentityInfo",
+    _RustLinkClosureInfo = "RustLinkClosureInfo",
     _TestCrateInfo = "TestCrateInfo",
     _UnstableRustFeaturesInfo = "UnstableRustFeaturesInfo",
 )
@@ -38,6 +40,8 @@ CrateGroupInfo = _CrateGroupInfo
 CrateInfo = _CrateInfo
 DepInfo = _DepInfo
 DepVariantInfo = _DepVariantInfo
+RustCrateIdentityInfo = _RustCrateIdentityInfo
+RustLinkClosureInfo = _RustLinkClosureInfo
 TestCrateInfo = _TestCrateInfo
 UnstableRustFeaturesInfo = _UnstableRustFeaturesInfo
 UnstableSelfProfileInfo = _UnstableSelfProfileInfo

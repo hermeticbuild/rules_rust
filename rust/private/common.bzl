@@ -23,7 +23,7 @@ which exports the `rust_common` struct.
 In the Bazel lingo, `rust_common` gives the access to the Rust Sandwich API.
 """
 
-load(":providers.bzl", "CrateGroupInfo", "CrateInfo", "DepInfo", "DepVariantInfo", "StdLibInfo", "TestCrateInfo")
+load(":providers.bzl", "CrateGroupInfo", "CrateInfo", "DepInfo", "DepVariantInfo", "RustCrateIdentityInfo", "RustLinkClosureInfo", "StdLibInfo", "TestCrateInfo")
 
 # This constant only represents the default value for attributes and macros
 # defined in `rules_rust`. Like any attribute public attribute, it can be
@@ -67,6 +67,8 @@ def _create_crate_info(**kwargs):
         kwargs.update({"root_path": ""})
     if not "owner" in kwargs:
         kwargs.update({"owner": None})
+    if not "crate_identity" in kwargs:
+        kwargs.update({"crate_identity": None})
     return CrateInfo(**kwargs)
 
 rust_common = struct(
@@ -74,6 +76,8 @@ rust_common = struct(
     crate_info = CrateInfo,
     dep_info = DepInfo,
     dep_variant_info = DepVariantInfo,
+    rust_crate_identity_info = RustCrateIdentityInfo,
+    rust_link_closure_info = RustLinkClosureInfo,
     stdlib_info = StdLibInfo,
     test_crate_info = TestCrateInfo,
     crate_group_info = CrateGroupInfo,
