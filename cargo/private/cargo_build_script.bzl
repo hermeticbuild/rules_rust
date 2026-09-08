@@ -139,6 +139,7 @@ def _prefix_pwd_to_flag(args, flag_variations):
     Returns:
         list: The modified argument list with relative paths prefixed with ${pwd}.
     """
+    flags = [(flag, _expects_space_separated_arg(flag)) for flag in sorted(flag_variations, key = len, reverse = True)]
     res = []
     prefix_next_arg = False
     for arg in args:
@@ -153,10 +154,10 @@ def _prefix_pwd_to_flag(args, flag_variations):
         handled = False
         new_prefix_next_arg = False
 
-        for flag in sorted(flag_variations, key = len, reverse = True):
+        for flag, expects_space_separated_arg in flags:
             # Check for exact match first
             if arg == flag:
-                if _expects_space_separated_arg(flag):
+                if expects_space_separated_arg:
                     # Flag without '=' or ':': next arg might be space-separated path
                     new_prefix_next_arg = True
 
@@ -178,7 +179,7 @@ def _prefix_pwd_to_flag(args, flag_variations):
             # Check for space-separated form (only for flags without '=' or ':').
             # A leading '-' means the flag's value was omitted and this is
             # actually the next flag, not a path; leave it untouched.
-            if _expects_space_separated_arg(flag) and prefix_next_arg and not arg.strip().startswith("-") and _should_prefix_pwd(arg.strip()):
+            if expects_space_separated_arg and prefix_next_arg and not arg.strip().startswith("-") and _should_prefix_pwd(arg.strip()):
                 res.append("${{pwd}}/{}".format(arg.strip()))
                 handled = True
                 break
