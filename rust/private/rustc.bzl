@@ -184,7 +184,8 @@ def collect_deps(
         deps,
         proc_macro_deps,
         aliases,
-        extra_named_deps = None):
+        extra_named_deps = None,
+        collect_linkstamps = True):
     """Walks through dependencies and collects the transitive dependencies.
 
     Args:
@@ -192,6 +193,7 @@ def collect_deps(
         proc_macro_deps (list): The proc_macro deps from `filter_deps(ctx)`.
         aliases (dict): A dict mapping aliased targets to their actual Crate information.
         extra_named_deps (depset[AliasableDepInfo], optional): Extra named dependencies.
+        collect_linkstamps (bool, optional): Whether to inspect C++ deps for linkstamps.
 
     Returns:
         tuple: Returns a tuple of:
@@ -242,7 +244,7 @@ def collect_deps(
         cc_info = dep.cc_info
         dep_build_info = dep.build_info
 
-        if cc_info:
+        if collect_linkstamps and cc_info:
             for li in cc_info.linking_context.linker_inputs.to_list():
                 linkstamps.extend(li.linkstamps)
 
@@ -1983,6 +1985,7 @@ def rustc_compile(
         proc_macro_deps = proc_macro_deps,
         aliases = crate_info.aliases,
         extra_named_deps = extra_named_deps,
+        collect_linkstamps = crate_info.type in ("bin", "cdylib", "proc-macro") and not experimental_use_cc_common_link,
     )
     extra_unsupported_features = [RUST_LINK_CC_FEATURE]
     if crate_info.type in ["bin", "cdylib"] and dep_info.transitive_noncrates.to_list():
