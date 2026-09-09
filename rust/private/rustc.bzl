@@ -1646,13 +1646,12 @@ def construct_arguments(
             {},
         ))
 
-    # Ensure the sysroot is set for the target platform. Compute the dirname
-    # from the underlying `sysroot_anchor` `File` via `map_each` so Bazel's
-    # path mapping can rewrite it.
+    # Ensure the sysroot is set for the target platform. Derive it from the
+    # `rustc` `File` via `map_each` so Bazel's path mapping can rewrite it.
     if toolchain._toolchain_generated_sysroot:
         rustc_flags.add_all(
-            [toolchain.sysroot_anchor],
-            map_each = _get_dirname,
+            [toolchain.rustc],
+            map_each = _get_sysroot_dir,
             format_each = "--sysroot=%s",
         )
 
@@ -3644,6 +3643,10 @@ def _get_crate_root_path(args):
         return paths.join(file.path, root_path)
     else:
         return file.path
+
+def _get_sysroot_dir(rustc):
+    """Return the sysroot containing `rustc`, which always sits at `<sysroot>/bin/rustc`."""
+    return rustc.dirname.rpartition("/")[0]
 
 def _get_dirname(file):
     """A helper function for `_add_native_link_flags`.
