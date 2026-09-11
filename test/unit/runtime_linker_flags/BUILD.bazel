@@ -1,0 +1,3 @@
+load(":runtime_linker_flags_test.bzl", "runtime_linker_flags_test_suite")
+
+runtime_linker_flags_test_suite(name = "runtime_linker_flags_test_suite")

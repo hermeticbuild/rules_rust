@@ -43,6 +43,7 @@ load(
     "UnstableRustFeaturesInfo",
     _BuildInfo = "BuildInfo",
 )
+load(":runtime_linker_flags.bzl", "can_omit_runtime_selection", "omit_unused_runtime_selection")
 load(":rustc_resource_set.bzl", "get_rustc_resource_set", "is_codegen_units_enabled")
 load(":stamp.bzl", "is_stamping_enabled")
 load(
@@ -406,7 +407,7 @@ def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_config
         _get_linker_env(linker_config),
     )
 
-def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary):
+def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary, omit_runtime_selection = False):
     user_link_flags = get_cc_user_link_flags(ctx)
 
     cc_linker = None
@@ -459,6 +460,8 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
         is_direct_driver = use_rust_linker and toolchain.linker_type == "direct",
         target_arch = toolchain.target_arch,
         rpaths = rpaths,
+        omit_runtime_selection = omit_runtime_selection and not use_rust_linker and
+                                 cc_linker.replace("\\", "/").split("/")[-1] in ("clang", "clang++", "clang.exe", "clang++.exe"),
     )
 
 def _get_linker_path(linker_config):
@@ -486,6 +489,9 @@ def _get_linker_args(linker_config):
             action_name = linker_config.action_name,
             variables = linker_config.variables,
         ))
+
+    if linker_config.omit_runtime_selection:
+        link_args = omit_unused_runtime_selection(link_args)
 
     if linker_config.rust_linker:
         # Make sure we include RPATHs for Rust ABI dylibs even when no cc_toolchain.
@@ -1496,6 +1502,18 @@ def construct_arguments(
                 feature_configuration,
                 rpaths,
                 add_flags_for_binary = add_flags_for_binary,
+                # rustc adds -nodefaultlibs on these targets unless explicitly
+                # overridden. Do not copy redundant Clang runtime-selection flags
+                # into that link. Opaque flags/build-script files stay untouched.
+                omit_runtime_selection = toolchain.target_os in ("linux", "darwin", "macos") and
+                                         not toolchain.target_flag_value.endswith(".json") and
+                                         not build_flags_files and
+                                         type(rust_flags) == "list" and
+                                         can_omit_runtime_selection(
+                                             collect_extra_rustc_flags(ctx, toolchain, crate_info.root, crate_info.type) +
+                                             rust_flags +
+                                             getattr(attr, "rustc_flags", []),
+                                         ),
             )
 
             ld_is_direct_driver = linker_config.is_direct_driver
