@@ -135,7 +135,8 @@ def _symlink_sysroot_tree(ctx, name, target, target_files = None):
 
     Args:
         ctx (ctx): The toolchain's context object
-        name (str): The name of the sysroot directory (typically `ctx.label.name`)
+        name (str): The name of the sysroot directory (typically `ctx.label.name`),
+            or None to use the files in place.
         target (Target): A target owning files to symlink
         target_files (depset): An optional depset to use in place of `target.files`.
 
@@ -145,6 +146,8 @@ def _symlink_sysroot_tree(ctx, name, target, target_files = None):
     tree_files = []
     if target_files == None:
         target_files = target.files
+    if name == None:
+        return target_files
     for file in target_files.to_list():
         # Parse the path to the file relative to the workspace root so a
         # symlink matching this path can be created within the sysroot.
@@ -172,13 +175,15 @@ def _symlink_sysroot_bin(ctx, name, directory, target):
 
     Args:
         ctx (ctx): The rule's context object
-        name (str): A common name for the output directory
+        name (str): A common name for the output directory, or None to use `target` in place
         directory (str): The directory under `name` to put the file in
         target (File): A File object to symlink to
 
     Returns:
         File: A newly generated symlink file
     """
+    if name == None:
+        return target
     symlink = ctx.actions.declare_file("{}/{}/{}".format(
         name,
         directory,
@@ -198,6 +203,24 @@ def _default_runfiles_files(target):
         return None
 
     return target[DefaultInfo].default_runfiles.files
+
+def _sysroot_of_rustc(path):
+    """Return the sysroot directory for a `<sysroot>/bin/rustc` path."""
+    return path.rpartition("/")[0].rpartition("/")[0]
+
+def _is_source_sysroot(rustc, files):
+    """Whether `rustc` and `files` already form a sysroot tree of source files.
+
+    Downloaded toolchain repositories unpack every component into one tree rustc accepts as a
+    sysroot directly. Using it in place keeps sysroot paths short enough for Windows.
+    """
+    if not rustc.is_source or not rustc.dirname.endswith("/bin"):
+        return False
+    prefix = _sysroot_of_rustc(rustc.path) + "/"
+    for file in files:
+        if not file.is_source or not file.path.startswith(prefix):
+            return False
+    return True
 
 def _generate_sysroot(
         ctx,
@@ -237,9 +260,16 @@ def _generate_sysroot(
         rust_objcopy (File, optional): The path to a `rust-objcopy` executable.
 
     Returns:
-        struct: A struct of generated files representing the new sysroot
+        struct: A struct of files representing the sysroot, with `path` and `short_path`
+            naming its root directory.
     """
     name = ctx.label.name
+    if _is_source_sysroot(
+        rustc,
+        [f for f in [rustdoc, clippy, cargo, cargo_clippy, rustfmt, rust_objcopy] if f] +
+        depset(transitive = [t.files for t in [rustc_lib, llvm_tools, rust_std, linker] if t] + [r for r in [_default_runfiles_files(linker)] if r]).to_list(),
+    ):
+        name = None
 
     # Define runfiles
     direct_files = []
@@ -343,22 +373,24 @@ def _generate_sysroot(
         transitive_file_sets.append(depset(ctx.files.rust_std))
 
     # Declare a file in the root of the sysroot to make locating the sysroot easy
-    sysroot_anchor = ctx.actions.declare_file("{}/rust.sysroot".format(name))
-    ctx.actions.write(
-        output = sysroot_anchor,
-        content = "\n".join([
-            "cargo: {}".format(cargo),
-            "clippy: {}".format(clippy),
-            "cargo-clippy: {}".format(cargo_clippy),
-            "linker: {}".format(linker),
-            "llvm_tools: {}".format(llvm_tools),
-            "rust_std: {}".format(rust_std),
-            "rustc_lib: {}".format(rustc_lib),
-            "rustc: {}".format(rustc),
-            "rustdoc: {}".format(rustdoc),
-            "rustfmt: {}".format(rustfmt),
-        ]),
-    )
+    sysroot_anchor = None
+    if name:
+        sysroot_anchor = ctx.actions.declare_file("{}/rust.sysroot".format(name))
+        ctx.actions.write(
+            output = sysroot_anchor,
+            content = "\n".join([
+                "cargo: {}".format(cargo),
+                "clippy: {}".format(clippy),
+                "cargo-clippy: {}".format(cargo_clippy),
+                "linker: {}".format(linker),
+                "llvm_tools: {}".format(llvm_tools),
+                "rust_std: {}".format(rust_std),
+                "rustc_lib: {}".format(rustc_lib),
+                "rustc: {}".format(rustc),
+                "rustdoc: {}".format(rustdoc),
+                "rustfmt: {}".format(rustfmt),
+            ]),
+        )
 
     # Create a depset of all sysroot files (symlinks and their real paths)
     all_files = depset(direct_files, transitive = transitive_file_sets)
@@ -369,11 +401,13 @@ def _generate_sysroot(
         cargo_clippy = sysroot_cargo_clippy,
         clippy = sysroot_clippy,
         linker = sysroot_linker,
+        path = _sysroot_of_rustc(sysroot_rustc.path),
         rust_std = sysroot_rust_std,
         rustc = sysroot_rustc,
         rustc_lib = sysroot_rustc_lib,
         rustdoc = sysroot_rustdoc,
         rustfmt = sysroot_rustfmt,
+        short_path = _sysroot_of_rustc(sysroot_rustc.short_path),
         sysroot_anchor = sysroot_anchor,
     )
 
@@ -476,9 +510,8 @@ def _rust_toolchain_impl(ctx):
         rust_objcopy = ctx.file.rust_objcopy,
     )
 
-    # Determine the path and short_path of the sysroot
-    sysroot_path = sysroot.sysroot_anchor.dirname
-    sysroot_short_path, _, _ = sysroot.sysroot_anchor.short_path.rpartition("/")
+    sysroot_path = sysroot.path
+    sysroot_short_path = sysroot.short_path
 
     # Variables for make variable expansion
     make_variables = {
