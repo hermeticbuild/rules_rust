@@ -406,6 +406,16 @@ def get_linker_and_args(ctx, crate_type, toolchain, cc_toolchain, feature_config
         _get_linker_env(linker_config),
     )
 
+_LinkerConfigInfo = provider(fields = [
+    "action_name",
+    "feature_configuration",
+    "is_direct_driver",
+    "rpaths",
+    "rust_linker",
+    "target_arch",
+    "variables",
+])
+
 def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary):
     user_link_flags = get_cc_user_link_flags(ctx)
 
@@ -451,7 +461,7 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
 
     # Keep CcToolchainVariables and the Rust linker File until map_each runs so
     # cc_common and File.path use the Rustc action's path mapper.
-    return struct(
+    return _LinkerConfigInfo(
         feature_configuration = feature_configuration,
         action_name = action_name,
         variables = link_variables,
