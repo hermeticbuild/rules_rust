@@ -372,11 +372,6 @@ rust_prost_aspect = aspect(
             executable = True,
             cfg = "exec",
         ),
-        "_grep_includes": attr.label(
-            allow_single_file = True,
-            default = Label("@bazel_tools//tools/cpp:grep-includes"),
-            cfg = "exec",
-        ),
     } | RUSTC_ATTRS | {
         # Need to override this attribute to explicitly set the workspace.
         "_always_enable_metadata_output_groups": attr.label(
