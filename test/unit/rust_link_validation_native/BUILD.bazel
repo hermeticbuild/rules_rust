@@ -1,0 +1,4 @@
+load(":rust_link_validation_native_test.bzl", "rust_link_validation_native_test_suite")
+
+############################ UNIT TESTS #############################
+rust_link_validation_native_test_suite(name = "rust_link_validation_native_test_suite")

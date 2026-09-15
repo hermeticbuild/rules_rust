@@ -34,6 +34,7 @@ load(
     ":rust_allocator_libraries.bzl",
     "RUSTC_ALLOCATOR_LIBRARIES_ATTRS",
 )
+load(":rust_link_validation.bzl", "native_rust_link_validation_aspect")
 load(
     ":rustc.bzl",
     "UnstableSelfProfileInfo",
@@ -815,6 +816,7 @@ _COMMON_ATTRS = {
 
             These must be targets that provide `CrateInfo`, such as `rust_library`.
         """),
+        aspects = [native_rust_link_validation_aspect],
     ),
     "edition": attr.string(
         doc = "The rust edition to use for this crate. Defaults to the edition specified in the rust_toolchain.",
@@ -826,6 +828,7 @@ _COMMON_ATTRS = {
             These are typically `cc_library` targets.
         """),
         providers = [[CcInfo], [rust_common.crate_info]],
+        aspects = [native_rust_link_validation_aspect],
     ),
     "lint_config": attr.label(
         doc = "Set of lints to apply when building this crate.",
@@ -1091,11 +1094,50 @@ _RUST_TEST_ATTRS = {
     ),
 } | _COVERAGE_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS
 
+# `crate_identity` is intentionally restricted to library-producing rules and is
+# NOT part of `_COMMON_ATTRS`, so binaries, tests, examples, and build-script
+# executables never carry it. A Cargo package can legitimately contain both a
+# library and binaries; tagging every Cargo target with only its package ID
+# would incorrectly equate distinct Cargo targets.
+_CRATE_IDENTITY_ATTRS = {
+    "crate_identity": attr.string(
+        doc = dedent("""\
+            Optional logical identity of the upstream Rust library this target
+            represents.
+
+            When set, the configured library carries a `RustCrateIdentityInfo`
+            and participates in cross-link-unit crate-instance validation: a
+            native link unit may contain at most one configured crate instance
+            for each non-empty logical identity.
+
+            The `cargo:` prefix is reserved for generated Cargo library targets.
+            The crate generator emits a source-qualified identity of the form
+            `cargo:` + a canonical record encoding the Cargo package's source,
+            name, and version (e.g.
+            `cargo:["registry","sparse+https://index.crates.io/","log","0.4.22"]`).
+            The source is deliberately part of the identity: a Cargo package of
+            the same name and version pulled from two different registries is two
+            distinct logical libraries (private-registry shadowing of a common
+            name is intended), so cross-registry duplication is accepted rather
+            than flagged. The enforced invariant is per identity: within one
+            native link unit there may be at most one configured instance of each
+            source-qualified logical identity.
+
+            Handwritten libraries should use a reverse-domain or
+            repository-qualified identifier, e.g. `com.example:mylib`, and opt
+            out (or in) consciously.
+
+            Leave empty (the default) for ordinary targets that opt out of this
+            facility.
+        """),
+    ),
+}
+
 rust_library = rule(
     implementation = _rust_library_impl,
     provides = COMMON_PROVIDERS,
     cfg = per_crate_flag_trim_transition,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | {
         "disable_pipelining": attr.bool(
             default = False,
             doc = dedent("""\
@@ -1268,7 +1310,7 @@ _rust_static_library_transition = transition(
 
 rust_static_library = rule(
     implementation = _rust_static_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS,
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | _PLATFORM_ATTRS,
     fragments = ["cpp"],
     cfg = _rust_static_library_transition,
     toolchains = [
@@ -1300,7 +1342,7 @@ def _rust_shared_library_transition_impl(settings, attr):
         _PER_CRATE_FLAG_SETTING: per_crate_flags,
     }
 
-_rust_shared_library_transition = transition(
+_rust_cdylib_library_transition = transition(
     implementation = _rust_shared_library_transition_impl,
     inputs = [
         "//command_line_option:platforms",
@@ -1330,9 +1372,9 @@ _CC_RUNTIME_LINKAGE_ATTRS = {
 
 rust_cdylib_library = rule(
     implementation = _rust_cdylib_library_impl,
-    attrs = _COMMON_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | _CC_RUNTIME_LINKAGE_ATTRS,
+    attrs = _COMMON_ATTRS | _CRATE_IDENTITY_ATTRS | _PLATFORM_ATTRS | _EXPERIMENTAL_USE_CC_COMMON_LINK_ATTRS | _CC_RUNTIME_LINKAGE_ATTRS,
     fragments = ["cpp"],
-    cfg = _rust_shared_library_transition,
+    cfg = _rust_cdylib_library_transition,
     toolchains = [
         str(Label("//rust:toolchain_type")),
         config_common.toolchain_type("@bazel_tools//tools/cpp:toolchain_type", mandatory = False),
@@ -1362,7 +1404,7 @@ rust_proc_macro = rule(
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
-    },
+    } | _CRATE_IDENTITY_ATTRS,
     fragments = ["cpp"],
     toolchains = [
         str(Label("//rust:toolchain_type")),
