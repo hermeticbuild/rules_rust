@@ -2218,6 +2218,7 @@ def rustc_compile(
             stamp = stamp,
             use_json_output = True,
             build_metadata = True,
+            skip_expanding_rustc_env = skip_expanding_rustc_env,
             require_explicit_unstable_features = require_explicit_unstable_features,
             inject_allow_features_guardrail = inject_allow_features_guardrail,
             allowed_unstable_rust_features = allowed_unstable_rust_features,
