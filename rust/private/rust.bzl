@@ -312,7 +312,7 @@ def _rust_binary_impl(ctx):
     rustc_rmeta_output = None
     if can_build_metadata(toolchain, ctx, ctx.attr.crate_type):
         rust_metadata = ctx.actions.declare_file(
-            metadata_output_path(toolchain, "lib" + crate_name),
+            metadata_output_path(toolchain, "lib{}-{}".format(crate_name, determine_output_hash(crate_root, ctx.label))),
             sibling = output,
         )
         rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
@@ -418,7 +418,7 @@ def _rust_test_impl(ctx):
         rustc_rmeta_output = None
         if can_build_metadata(toolchain, ctx, crate_type):
             rust_metadata = ctx.actions.declare_file(
-                metadata_output_path(toolchain, "lib" + crate_name),
+                metadata_output_path(toolchain, "lib{}-{}".format(crate_name, output_hash)),
                 sibling = output,
             )
             rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
@@ -489,7 +489,7 @@ def _rust_test_impl(ctx):
         rustc_rmeta_output = None
         if can_build_metadata(toolchain, ctx, crate_type):
             rust_metadata = ctx.actions.declare_file(
-                metadata_output_path(toolchain, "lib" + crate_name),
+                metadata_output_path(toolchain, "lib{}-{}".format(crate_name, output_hash)),
                 sibling = output,
             )
             rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
