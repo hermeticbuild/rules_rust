@@ -135,6 +135,7 @@ def rust_clippy_action(ctx, clippy_executable, crate_info, config, output = None
         proc_macro_deps = crate_info.proc_macro_deps.to_list(),
         aliases = crate_info.aliases,
         extra_named_deps = crate_info.extra_named_deps,
+        collect_linkstamps = False,
     )
 
     # Gather the necessary rust flags to apply lints, if they were provided.
