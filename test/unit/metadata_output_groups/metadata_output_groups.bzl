@@ -44,6 +44,63 @@ def _metadata_output_groups_missing_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _collect_metadata_impl(ctx):
+    return [DefaultInfo(files = depset(transitive = [
+        target[OutputGroupInfo].build_metadata
+        for target in ctx.attr.targets
+    ]))]
+
+_collect_metadata = rule(
+    implementation = _collect_metadata_impl,
+    attrs = {"targets": attr.label_list()},
+)
+
+def _metadata_names_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    metadata = analysistest.target_under_test(env)[DefaultInfo].files.to_list()
+    asserts.equals(env, 4, len(metadata), "Each binary and test must have its own metadata output")
+    return analysistest.end(env)
+
+_metadata_names_test = analysistest.make(
+    _metadata_names_test_impl,
+    config_settings = {
+        str(Label("//rust/settings:always_enable_metadata_output_groups")): True,
+    },
+)
+
+def _metadata_names_test_targets():
+    targets = []
+    for suffix in ("a", "b"):
+        rust_binary(
+            name = "same_name_binary_" + suffix,
+            crate_name = "shared_binary",
+            srcs = ["bin.rs"],
+            edition = "2021",
+            tags = ["manual"],
+        )
+        rust_test(
+            name = "same_name_unit_" + suffix,
+            crate_name = "shared_unit",
+            srcs = ["unit.rs"],
+            edition = "2021",
+            tags = ["manual"],
+        )
+        targets.extend([
+            ":same_name_binary_" + suffix,
+            ":same_name_unit_" + suffix,
+        ])
+    _collect_metadata(
+        name = "same_name_metadata",
+        targets = targets,
+        testonly = True,
+        tags = ["manual"],
+    )
+    _metadata_names_test(
+        name = "metadata_names_test",
+        target_under_test = ":same_name_metadata",
+    )
+    return [":metadata_names_test"]
+
 metadata_output_groups_present_test = analysistest.make(
     _metadata_output_groups_present_test_impl,
     config_settings = {
@@ -92,6 +149,7 @@ def metadata_output_groups_test_suite(name):
         always_enable = False,
         suffix = "_without_metadata",
     ))
+    tests.extend(_metadata_names_test_targets())
 
     native.test_suite(
         name = name,
