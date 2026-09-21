@@ -772,19 +772,24 @@ def _cargo_build_script_impl(ctx):
 
 _COMPILATION_MODE = "//command_line_option:compilation_mode"
 _FEATURES = "//command_line_option:features"
+_HOST_FEATURES = "//command_line_option:host_features"
 _USE_EXEC_FEATURES = "rules_rust_use_exec_features"
 
 def _cargo_build_script_exec_transition_impl(settings, attr):
     features = settings[_FEATURES]
+    host_features = settings[_HOST_FEATURES]
     return {
         _COMPILATION_MODE: attr.target_compilation_mode,
         _FEATURES: features if _USE_EXEC_FEATURES in features else features + [_USE_EXEC_FEATURES],
+        # Bazel restores features from host_features on nested exec transitions,
+        # including the transition to a build dependency's proc macros.
+        _HOST_FEATURES: host_features if _USE_EXEC_FEATURES in host_features else host_features + [_USE_EXEC_FEATURES],
     }
 
 _cargo_build_script_exec_transition = transition(
     implementation = _cargo_build_script_exec_transition_impl,
-    inputs = [_FEATURES],
-    outputs = [_COMPILATION_MODE, _FEATURES],
+    inputs = [_FEATURES, _HOST_FEATURES],
+    outputs = [_COMPILATION_MODE, _FEATURES, _HOST_FEATURES],
 )
 
 def _get_cargo_build_script_cfg():
