@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod cdylib;
 mod flags;
 mod options;
 mod output;
@@ -380,6 +381,19 @@ fn check_output_for_working_dir(
 }
 
 fn main() -> Result<(), ProcessWrapperError> {
+    if let Some(output) = std::env::var_os(cdylib::EXPORT_FILE_ENV) {
+        let symbols_output = std::env::var_os(cdylib::SYMBOLS_FILE_ENV)
+            .ok_or_else(|| ProcessWrapperError("missing cdylib symbols output".to_owned()))?;
+        let native_dir = std::env::var_os(cdylib::NATIVE_DIR_ENV)
+            .ok_or_else(|| ProcessWrapperError("missing cdylib native directory".to_owned()))?;
+        return cdylib::capture_exports(
+            std::path::Path::new(&output),
+            std::path::Path::new(&symbols_output),
+            std::path::Path::new(&native_dir),
+            std::env::args().skip(1).collect(),
+        )
+        .map_err(|e| ProcessWrapperError(format!("failed to capture cdylib exports: {e}")));
+    }
     let opts = options().map_err(|e| ProcessWrapperError(e.to_string()))?;
 
     let (child_arguments, dep_dir_cleanup) =
@@ -403,6 +417,25 @@ fn main() -> Result<(), ProcessWrapperError> {
             Stdio::inherit()
         })
         .stderr(Stdio::piped());
+    if let Some(export_file) = opts.rustc_cdylib_export_file {
+        // Run rustc's link preparation to obtain its exact export policy,
+        // including C exports defined by dependencies. The recursive linker
+        // invocation preserves its link inputs; cc_common.link produces the .so.
+        let linker = std::env::current_exe()
+            .map_err(|e| ProcessWrapperError(format!("failed to locate process wrapper: {e}")))?;
+        let symbols_file = opts
+            .rustc_cdylib_symbols_file
+            .ok_or_else(|| ProcessWrapperError("missing --rustc-cdylib-symbols-file".to_owned()))?;
+        let native_dir = opts
+            .rustc_cdylib_native_dir
+            .ok_or_else(|| ProcessWrapperError("missing --rustc-cdylib-native-dir".to_owned()))?;
+        command
+            .arg(format!("-Clinker={}", linker.display()))
+            .arg("-Clinker-flavor=gcc")
+            .env(cdylib::EXPORT_FILE_ENV, export_file)
+            .env(cdylib::SYMBOLS_FILE_ENV, symbols_file)
+            .env(cdylib::NATIVE_DIR_ENV, native_dir);
+    }
     debug_log!("{:#?}", command);
     let mut child = command
         .spawn()

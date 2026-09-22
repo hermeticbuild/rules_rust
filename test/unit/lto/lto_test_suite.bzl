@@ -6,7 +6,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_library_group", "rust_proc_macro")
+load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_library_group", "rust_proc_macro", "rust_shared_library")
 load(
     "//test/unit:common.bzl",
     "assert_action_mnemonic",
@@ -149,6 +149,8 @@ def _distributed_thin_lto_library(ctx):
     assert_argv_contains(env, action, "--emit=link")
     assert_argv_contains_prefix(env, action, "--emit=obj=")
     assert_argv_contains(env, action, "-Clinker-plugin-lto")
+    assert_argv_contains(env, action, "-Zpacked-bundled-libs")
+    assert_argv_contains(env, action, "-Zallow-features=")
     assert_argv_contains_prefix_not(env, action, "-Clto")
     assert_argv_contains_prefix_not(env, action, "-Cembed-bitcode")
 
@@ -207,6 +209,30 @@ def _distributed_thin_lto_binary(ctx):
 
 _distributed_thin_lto_binary_test = analysistest.make(
     _distributed_thin_lto_binary,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS,
+)
+
+def _distributed_thin_lto_cdylib(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    actions = _assert_distributed_thin_lto_link(env, target)
+    rustc_action = actions["Rustc"]
+    assert_argv_contains(env, rustc_action, "--crate-type=cdylib")
+    assert_argv_contains(env, rustc_action, "-Clinker-plugin-lto")
+    assert_argv_contains_prefix(env, rustc_action, "--emit=obj=")
+    assert_argv_contains(env, rustc_action, "--emit=link")
+    assert_argv_contains(env, rustc_action, "--rustc-cdylib-export-file")
+    assert_argv_contains_prefix_not(env, rustc_action, "-Clto")
+    assert_argv_contains(env, actions["CppLink"], "-shared")
+    for mnemonic in ["CppLTOIndexing", "CppLink"]:
+        assert_argv_contains_prefix(env, actions[mnemonic], "-Wl,--version-script=")
+        asserts.true(env, any([file.extension == "exports" for file in actions[mnemonic].inputs.to_list()]))
+    asserts.true(env, any([file.basename == "libdistributed_cdylib.so" for file in actions["CppLink"].outputs.to_list()]))
+    asserts.equals(env, ["libdistributed_cdylib.so"], [file.basename for file in target[DefaultInfo].files.to_list()])
+    return analysistest.end(env)
+
+_distributed_thin_lto_cdylib_test = analysistest.make(
+    _distributed_thin_lto_cdylib,
     config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS,
 )
 
@@ -443,6 +469,45 @@ def lto_test_suite(name):
         ],
     )
 
+    write_file(
+        name = "crate_cdylib",
+        out = "cdylib.rs",
+        content = [
+            "extern \"C\" { fn native_add(left: usize, right: usize) -> usize; }",
+            "#[no_mangle]",
+            "pub extern \"C\" fn cdylib_add(left: usize, right: usize) -> usize {",
+            "    unsafe { native_add(distributed_lib::add(left, right), 1) }",
+            "}",
+            "",
+        ],
+    )
+
+    write_file(
+        name = "cdylib_native_src",
+        out = "cdylib_native.cc",
+        content = [
+            "#include <cstdint>",
+            "extern \"C\" uintptr_t native_add(uintptr_t left, uintptr_t right) { return left + right; }",
+            "",
+        ],
+    )
+
+    write_file(
+        name = "cdylib_test_src",
+        out = "cdylib_test.cc",
+        content = [
+            "#include <cstdint>",
+            "#include <dlfcn.h>",
+            "extern \"C\" uintptr_t cdylib_add(uintptr_t, uintptr_t);",
+            "extern \"C\" uintptr_t distributed_add(uintptr_t, uintptr_t);",
+            "int main() {",
+            "    return cdylib_add(2, 2) == 5 && distributed_add(2, 2) == 4",
+            "        && dlsym(RTLD_DEFAULT, \"native_add\") == nullptr ? 0 : 1;",
+            "}",
+            "",
+        ],
+    )
+
     rust_library(
         name = "lib",
         srcs = [":lib.rs"],
@@ -494,6 +559,29 @@ def lto_test_suite(name):
         deps = [":distributed_lib_group"],
         edition = "2021",
         tags = ["manual"],
+    )
+
+    cc_library(
+        name = "cdylib_native",
+        srcs = [":cdylib_native.cc"],
+        tags = ["manual"],
+    )
+
+    rust_shared_library(
+        name = "distributed_cdylib",
+        srcs = [":cdylib.rs"],
+        edition = "2021",
+        deps = [":cdylib_native", ":distributed_lib_group"],
+        tags = ["manual"],
+    )
+
+    cc_test(
+        name = "distributed_cdylib_runtime_test",
+        srcs = [":cdylib_test.cc"],
+        linkopts = ["-ldl"],
+        deps = [":distributed_cdylib"],
+        tags = ["manual"],
+        target_compatible_with = ["@platforms//os:linux"],
     )
 
     rust_binary(
@@ -589,6 +677,11 @@ def lto_test_suite(name):
         target_under_test = ":distributed_bin",
     )
 
+    _distributed_thin_lto_cdylib_test(
+        name = "distributed_thin_lto_cdylib_test",
+        target_under_test = ":distributed_cdylib",
+    )
+
     _distributed_thin_lto_global_allocator_test(
         name = "distributed_thin_lto_global_allocator_test",
         target_under_test = ":distributed_global_allocator_bin",
@@ -655,6 +748,7 @@ def lto_test_suite(name):
             ":lto_proc_macro_test",
             ":distributed_thin_lto_library_test",
             ":distributed_thin_lto_binary_test",
+            ":distributed_thin_lto_cdylib_test",
             ":distributed_thin_lto_global_allocator_test",
             ":distributed_thin_lto_cc_binary_test",
             ":distributed_thin_lto_shared_backends_test",
