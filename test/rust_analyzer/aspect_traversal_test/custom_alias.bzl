@@ -1,10 +1,10 @@
 """Alias-like rule for testing."""
 
-load("@rules_rust//rust:defs.bzl", "rust_common")
+load("@rules_rust//rust/private:providers.bzl", "CrateInfo", "DepInfo")
 
 def _custom_alias_impl(ctx):
     actual = ctx.attr.actual
-    return [actual[rust_common.crate_info], actual[rust_common.dep_info]]
+    return [actual[CrateInfo], actual[DepInfo]]
 
 custom_alias = rule(
     implementation = _custom_alias_impl,
@@ -14,4 +14,5 @@ custom_alias = rule(
             mandatory = True,
         ),
     },
+    provides = [CrateInfo, DepInfo],
 )

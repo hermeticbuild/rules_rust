@@ -1,7 +1,7 @@
 """PyO3 Toolchains"""
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("@rules_rust//rust:defs.bzl", "rust_common")
+load("@rules_rust//rust/private:providers.bzl", "CrateGroupInfo", "CrateInfo", "DepInfo", "DepVariantInfo")
 
 PYO3_TOOLCHAIN = "//extensions/pyo3:toolchain_type"
 
@@ -172,21 +172,18 @@ This toolchain is how the rules know which version of `pyo3` to link against.
     attrs = {
         "pyo3": attr.label(
             doc = "The PyO3 library.",
-            providers = [[rust_common.crate_info], [rust_common.crate_group_info]],
+            providers = [[CrateInfo], [CrateGroupInfo]],
             mandatory = True,
         ),
         "pyo3_introspection": attr.label(
             doc = "The PyO3 introspection library.",
-            providers = [[rust_common.crate_info], [rust_common.crate_group_info]],
+            providers = [[CrateInfo], [CrateGroupInfo]],
             mandatory = True,
         ),
     },
 )
 
-def _current_rust_pyo3_toolchain_impl(ctx):
-    toolchain = ctx.toolchains[RUST_PYO3_TOOLCHAIN]
-    target = toolchain.pyo3
-
+def _forward_rust_providers(target):
     providers = []
 
     # TODO: Remove this hack when we can just pass the input target's
@@ -200,53 +197,42 @@ def _current_rust_pyo3_toolchain_impl(ctx):
         ),
     )
 
-    if rust_common.crate_info in target:
-        providers.append(target[rust_common.crate_info])
+    if CrateInfo in target:
+        providers.append(target[CrateInfo])
 
-    if rust_common.dep_info in target:
-        providers.append(target[rust_common.dep_info])
+    if DepInfo in target:
+        providers.append(target[DepInfo])
 
-    if rust_common.crate_group_info in target:
-        providers.append(target[rust_common.crate_group_info])
+    if CrateGroupInfo in target:
+        providers.append(target[CrateGroupInfo])
+
+    # Advertise one provider for both single-crate and crate-group toolchains.
+    providers.append(DepVariantInfo(
+        crate_info = target[CrateInfo] if CrateInfo in target else None,
+        dep_info = target[DepInfo] if DepInfo in target else None,
+        crate_group_info = target[CrateGroupInfo] if CrateGroupInfo in target else None,
+        build_info = None,
+        cc_info = None,
+    ))
 
     return providers
+
+def _current_rust_pyo3_toolchain_impl(ctx):
+    return _forward_rust_providers(ctx.toolchains[RUST_PYO3_TOOLCHAIN].pyo3)
 
 current_rust_pyo3_toolchain = rule(
     doc = "A rule for accessing the `rust_pyo3_toolchain.pyo3` library from the current configuration.",
     implementation = _current_rust_pyo3_toolchain_impl,
+    provides = [DepVariantInfo],
     toolchains = [RUST_PYO3_TOOLCHAIN],
 )
 
 def _current_rust_pyo3_introspection_toolchain_impl(ctx):
-    toolchain = ctx.toolchains[RUST_PYO3_TOOLCHAIN]
-    target = toolchain.pyo3_introspection
-
-    providers = []
-
-    # TODO: Remove this hack when we can just pass the input target's
-    # DefaultInfo provider through. Until then, we need to construct
-    # a new DefaultInfo provider with the files from the input target's
-    # provider.
-    providers.append(
-        DefaultInfo(
-            files = target[DefaultInfo].files,
-            runfiles = target[DefaultInfo].default_runfiles,
-        ),
-    )
-
-    if rust_common.crate_info in target:
-        providers.append(target[rust_common.crate_info])
-
-    if rust_common.dep_info in target:
-        providers.append(target[rust_common.dep_info])
-
-    if rust_common.crate_group_info in target:
-        providers.append(target[rust_common.crate_group_info])
-
-    return providers
+    return _forward_rust_providers(ctx.toolchains[RUST_PYO3_TOOLCHAIN].pyo3_introspection)
 
 current_rust_pyo3_introspection_toolchain = rule(
     doc = "A rule for accessing the `rust_pyo3_toolchain.pyo3_introspection` library from the current configuration.",
     implementation = _current_rust_pyo3_introspection_toolchain_impl,
+    provides = [DepVariantInfo],
     toolchains = [RUST_PYO3_TOOLCHAIN],
 )

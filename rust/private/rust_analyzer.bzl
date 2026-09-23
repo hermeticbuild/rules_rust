@@ -21,8 +21,7 @@ to Cargo.toml files.
 """
 
 load("//rust/platform:triple_mappings.bzl", "system_to_dylib_ext")
-load("//rust/private:common.bzl", "rust_common")
-load("//rust/private:providers.bzl", "RustAnalyzerGroupInfo", "RustAnalyzerInfo")
+load("//rust/private:providers.bzl", "CrateGroupInfo", "CrateInfo", "DepVariantInfo", "RustAnalyzerGroupInfo", "RustAnalyzerInfo", "TestCrateInfo")
 load("//rust/private:rustc.bzl", "BuildInfo")
 load(
     "//rust/private:utils.bzl",
@@ -90,9 +89,9 @@ def _accumulate_rust_analyzer_infos(dep_infos_to_accumulate, label_index_to_accu
         _accumulate_rust_analyzer_info(dep_infos_to_accumulate, label_index_to_accumulate, dep)
 
 def _rust_analyzer_aspect_impl(target, ctx):
-    if (rust_common.crate_info not in target and
-        rust_common.test_crate_info not in target and
-        rust_common.crate_group_info not in target):
+    if (CrateInfo not in target and
+        TestCrateInfo not in target and
+        CrateGroupInfo not in target):
         return []
 
     if RustAnalyzerInfo in target or RustAnalyzerGroupInfo in target:
@@ -129,12 +128,12 @@ def _rust_analyzer_aspect_impl(target, ctx):
     _accumulate_rust_analyzer_info(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "crate", None))
     _accumulate_rust_analyzer_info(dep_infos, labels_to_rais, getattr(ctx.rule.attr, "actual", None))
 
-    if rust_common.crate_group_info in target:
+    if CrateGroupInfo in target:
         return [RustAnalyzerGroupInfo(deps = dep_infos)]
-    elif rust_common.crate_info in target:
-        crate_info = target[rust_common.crate_info]
-    elif rust_common.test_crate_info in target:
-        crate_info = target[rust_common.test_crate_info].crate
+    elif CrateInfo in target:
+        crate_info = target[CrateInfo]
+    elif TestCrateInfo in target:
+        crate_info = target[TestCrateInfo].crate
     else:
         fail("Unexpected target type: {}".format(target))
 
@@ -188,10 +187,10 @@ def find_proc_macro_dylib(toolchain, target):
     Returns:
         (File): The path to the proc macro dylib, or None if this crate is not a proc-macro.
     """
-    if rust_common.crate_info in target:
-        crate_info = target[rust_common.crate_info]
-    elif rust_common.test_crate_info in target:
-        crate_info = target[rust_common.test_crate_info].crate
+    if CrateInfo in target:
+        crate_info = target[CrateInfo]
+    elif TestCrateInfo in target:
+        crate_info = target[TestCrateInfo].crate
     else:
         return None
 
@@ -210,6 +209,12 @@ def find_proc_macro_dylib(toolchain, target):
 rust_analyzer_aspect = aspect(
     attr_aspects = ["srcs", "deps", "proc_macro_deps", "crate", "actual", "proto"],
     implementation = _rust_analyzer_aspect_impl,
+    required_providers = [
+        [CrateInfo],
+        [TestCrateInfo],
+        [CrateGroupInfo],
+        [DepVariantInfo],
+    ],
     toolchains = [str(Label("//rust:toolchain_type"))],
     doc = "Annotates rust rules with RustAnalyzerInfo later used to build a rust-project.json",
 )
