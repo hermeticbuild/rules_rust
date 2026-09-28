@@ -61,9 +61,7 @@ def _toolchain_keeps_generated_stdlib_sysroot_test_impl(ctx):
 
     # Even a conventional lib/rustlib layout must be assembled when its
     # contents are generated, rather than downloaded source artifacts.
-    asserts.equals(env, toolchain_info.sysroot_anchor.dirname, toolchain_info.sysroot)
-    for file in toolchain_info.rust_std.to_list():
-        asserts.true(env, file.path.startswith(toolchain_info.sysroot + "/"))
+    asserts.equals(env, toolchain_info.rustc.dirname.rpartition("/")[0], toolchain_info.sysroot)
 
     return analysistest.end(env)
 

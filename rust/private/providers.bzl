@@ -133,7 +133,6 @@ SysrootInfo = provider(
     fields = {
         "anchor": "File: A file within the sysroot.",
         "anchor_relative_path": "str: The anchor's path relative to the sysroot root.",
-        "files": "depset[File]: Standard-library files within the sysroot.",
     },
 )
 

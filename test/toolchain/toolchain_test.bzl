@@ -243,6 +243,9 @@ def _toolchain_uses_source_stdlib_sysroot_impl(ctx):
         if stdlibs:
             roots = {file.path.rpartition("/lib/rustlib/")[0]: True for file in stdlibs}
             asserts.equals(env, 1, len(roots), "Expected a single stdlib sysroot")
+            search_paths = [path for flag, path in zip(action.argv, action.argv[1:]) if flag == "-L"]
+            for stdlib in stdlibs:
+                asserts.true(env, stdlib.dirname in search_paths, "Expected the original stdlib search path")
             asserts.equals(
                 env,
                 ["--sysroot=" + root for root in roots],
@@ -254,6 +257,21 @@ toolchain_uses_source_stdlib_sysroot_test = analysistest.make(
     _toolchain_uses_source_stdlib_sysroot_impl,
     config_settings = {
         str(Label("//rust/settings:toolchain_generated_sysroot")): True,
+    },
+)
+
+def _toolchain_omits_sysroot_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = [action for action in analysistest.target_actions(env) if action.mnemonic == "Rustc"]
+    asserts.true(env, len(actions) > 0, "Expected a Rustc action")
+    for action in actions:
+        asserts.equals(env, [], [arg for arg in action.argv if arg.startswith("--sysroot")])
+    return analysistest.end(env)
+
+toolchain_omits_sysroot_test = analysistest.make(
+    _toolchain_omits_sysroot_impl,
+    config_settings = {
+        str(Label("//rust/settings:toolchain_generated_sysroot")): False,
     },
 )
 
@@ -284,6 +302,10 @@ def toolchain_test_suite(name):
         name = "toolchain_uses_source_stdlib_sysroot_test",
         target_under_test = ":lib",
     )
+    toolchain_omits_sysroot_test(
+        name = "toolchain_omits_sysroot_test",
+        target_under_test = ":lib",
+    )
 
     native.test_suite(
         name = name,
@@ -292,5 +314,6 @@ def toolchain_test_suite(name):
             ":toolchain_adds_rustc_flags_shared_lib_test",
             ":rust_stdlib_filegroup_provides_runfiles_test",
             ":toolchain_uses_source_stdlib_sysroot_test",
+            ":toolchain_omits_sysroot_test",
         ],
     )
