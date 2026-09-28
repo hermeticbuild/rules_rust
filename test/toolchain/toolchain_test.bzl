@@ -227,6 +227,36 @@ rust_stdlib_filegroup_provides_runfiles_test = analysistest.make(
     _rust_stdlib_filegroup_provides_runfiles_test_impl,
 )
 
+def _toolchain_uses_source_stdlib_sysroot_impl(ctx):
+    env = analysistest.begin(ctx)
+    actions = [action for action in analysistest.target_actions(env) if action.mnemonic == "Rustc"]
+    asserts.true(env, len(actions) > 0, "Expected a Rustc action")
+    for action in actions:
+        # Use the actual downloaded standard library as the oracle, including
+        # toolchains whose compiler and stdlib belong to different repositories.
+        stdlibs = [
+            file
+            for file in action.inputs.to_list()
+            if file.is_source and file.basename.startswith("libstd-") and file.extension == "rlib"
+        ]
+        asserts.true(env, len(stdlibs) > 0, "Expected a downloaded standard library input")
+        if stdlibs:
+            roots = {file.path.rpartition("/lib/rustlib/")[0]: True for file in stdlibs}
+            asserts.equals(env, 1, len(roots), "Expected a single stdlib sysroot")
+            asserts.equals(
+                env,
+                ["--sysroot=" + root for root in roots],
+                [arg for arg in action.argv if arg.startswith("--sysroot=")],
+            )
+    return analysistest.end(env)
+
+toolchain_uses_source_stdlib_sysroot_test = analysistest.make(
+    _toolchain_uses_source_stdlib_sysroot_impl,
+    config_settings = {
+        str(Label("//rust/settings:toolchain_generated_sysroot")): True,
+    },
+)
+
 def toolchain_test_suite(name):
     """ Instantiates tests for rust toolchains.
 
@@ -250,11 +280,17 @@ def toolchain_test_suite(name):
         target_under_test = ":std_libs",
     )
 
+    toolchain_uses_source_stdlib_sysroot_test(
+        name = "toolchain_uses_source_stdlib_sysroot_test",
+        target_under_test = ":lib",
+    )
+
     native.test_suite(
         name = name,
         tests = [
             ":toolchain_adds_rustc_flags_lib_test",
             ":toolchain_adds_rustc_flags_shared_lib_test",
             ":rust_stdlib_filegroup_provides_runfiles_test",
+            ":toolchain_uses_source_stdlib_sysroot_test",
         ],
     )

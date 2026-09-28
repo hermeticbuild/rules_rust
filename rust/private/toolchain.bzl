@@ -199,6 +199,19 @@ def _default_runfiles_files(target):
 
     return target[DefaultInfo].default_runfiles.files
 
+def _source_stdlib_anchor(files):
+    """Find an anchor when all stdlib files share a source sysroot layout."""
+    if not files:
+        return None
+    root, separator, relative = files[0].path.rpartition("/lib/rustlib/")
+    if not separator or "/lib/" not in relative:
+        return None
+    prefix = root + separator
+    for file in files:
+        if not file.is_source or not file.path.startswith(prefix):
+            return None
+    return files[0]
+
 def _generate_sysroot(
         ctx,
         rustc,
@@ -479,6 +492,18 @@ def _rust_toolchain_impl(ctx):
     # Determine the path and short_path of the sysroot
     sysroot_path = sysroot.sysroot_anchor.dirname
     sysroot_short_path, _, _ = sysroot.sysroot_anchor.short_path.rpartition("/")
+    rust_std_files = sysroot.rust_std
+    stdlib_sysroot_anchor = None
+    if ctx.attr._toolchain_generated_sysroot[BuildSettingInfo].value:
+        stdlib_sysroot_anchor = _source_stdlib_anchor(ctx.files.rust_std)
+    if stdlib_sysroot_anchor:
+        # Keep the assembled tool tree for compiler runtime libraries, helper
+        # executables, and subprocesses that invoke rustc without --sysroot.
+        # Explicit compilations can use the downloaded stdlib in place, even
+        # when the compiler and other tools come from separate repositories.
+        sysroot_path = stdlib_sysroot_anchor.path.rpartition("/lib/rustlib/")[0]
+        sysroot_short_path = stdlib_sysroot_anchor.short_path.rpartition("/lib/rustlib/")[0]
+        rust_std_files = depset(ctx.files.rust_std)
 
     # Variables for make variable expansion
     make_variables = {
@@ -650,9 +675,9 @@ def _rust_toolchain_impl(ctx):
         lto = lto,
         make_variables = make_variable_info,
         rust_doc = sysroot.rustdoc,
-        rust_std = sysroot.rust_std,
+        rust_std = rust_std_files,
         rust_std_dylib = ctx.attr.rust_std[rust_common.stdlib_info].std_dylib,
-        rust_std_paths = depset([file.dirname for file in sysroot.rust_std.to_list()]),
+        rust_std_paths = depset([file.dirname for file in rust_std_files.to_list()]),
         rustc = sysroot.rustc,
         rustc_lib = sysroot.rustc_lib,
         rustfmt = sysroot.rustfmt,
@@ -666,6 +691,7 @@ def _rust_toolchain_impl(ctx):
         sysroot = sysroot_path,
         sysroot_anchor = sysroot.sysroot_anchor,
         sysroot_short_path = sysroot_short_path,
+        _stdlib_sysroot_anchor = stdlib_sysroot_anchor,
         target_arch = target_arch,
         target_flag_value = target_json if target_json else target_triple.str,
         target_json = target_json,

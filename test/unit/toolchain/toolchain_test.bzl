@@ -37,6 +37,18 @@ def _toolchain_specifies_target_json_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _toolchain_keeps_generated_stdlib_sysroot_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    toolchain_info = analysistest.target_under_test(env)[platform_common.ToolchainInfo]
+
+    # Even a conventional lib/rustlib layout must be assembled when its
+    # contents are generated, rather than downloaded source artifacts.
+    asserts.equals(env, toolchain_info.sysroot_anchor.dirname, toolchain_info.sysroot)
+    for file in toolchain_info.rust_std.to_list():
+        asserts.true(env, file.path.startswith(toolchain_info.sysroot + "/"))
+
+    return analysistest.end(env)
+
 def _toolchain_location_expands_linkflags_impl(ctx):
     env = analysistest.begin(ctx)
     toolchain_info = analysistest.target_under_test(env)[platform_common.ToolchainInfo]
@@ -89,6 +101,12 @@ def _std_libs_support_srcs_outside_package_test_impl(ctx):
 
 toolchain_specifies_target_triple_test = analysistest.make(_toolchain_specifies_target_triple_test_impl)
 toolchain_specifies_target_json_test = analysistest.make(_toolchain_specifies_target_json_test_impl)
+toolchain_keeps_generated_stdlib_sysroot_test = analysistest.make(
+    _toolchain_keeps_generated_stdlib_sysroot_test_impl,
+    config_settings = {
+        str(Label("//rust/settings:toolchain_generated_sysroot")): True,
+    },
+)
 toolchain_location_expands_linkflags_test = analysistest.make(_toolchain_location_expands_linkflags_impl)
 toolchain_location_expands_extra_rustc_flags_test = analysistest.make(_toolchain_location_expands_extra_rustc_flags_impl)
 std_libs_support_srcs_outside_package_test = analysistest.make(_std_libs_support_srcs_outside_package_test_impl)
@@ -101,6 +119,16 @@ def _define_test_targets():
     rust_stdlib_filegroup(
         name = "std_libs",
         srcs = [":stdlib_srcs"],
+    )
+
+    write_file(
+        name = "generated_stdlib",
+        out = "generated/lib/rustlib/toolchain-test-triple/lib/libstd.rlib",
+        content = [],
+    )
+    rust_stdlib_filegroup(
+        name = "generated_std_libs",
+        srcs = [":generated_stdlib"],
     )
 
     rust_stdlib_filegroup(
@@ -140,7 +168,7 @@ def _define_test_targets():
         dylib_ext = ".so",
         exec_triple = "x86_64-unknown-none",
         rust_doc = ":mock_rustdoc",
-        rust_std = ":std_libs",
+        rust_std = ":generated_std_libs",
         rustc = ":mock_rustc",
         process_wrapper = "@rules_rust//util/process_wrapper",
         linker = ":mock_rust_lld",
@@ -217,6 +245,10 @@ def toolchain_test_suite(name):
         name = "toolchain_specifies_target_triple_test",
         target_under_test = ":rust_triple_toolchain",
     )
+    toolchain_keeps_generated_stdlib_sysroot_test(
+        name = "toolchain_keeps_generated_stdlib_sysroot_test",
+        target_under_test = ":rust_triple_toolchain",
+    )
     toolchain_specifies_target_json_test(
         name = "toolchain_specifies_target_json_test",
         target_under_test = ":rust_json_toolchain",
@@ -242,6 +274,7 @@ def toolchain_test_suite(name):
         name = name,
         tests = [
             ":toolchain_specifies_target_triple_test",
+            ":toolchain_keeps_generated_stdlib_sysroot_test",
             ":toolchain_specifies_target_json_test",
             ":toolchain_specifies_inline_target_json_test",
             ":toolchain_location_expands_linkflags_test",
