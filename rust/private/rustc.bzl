@@ -45,7 +45,6 @@ load(
 )
 load(":rustc_resource_set.bzl", "get_rustc_resource_set", "is_codegen_units_enabled")
 load(":stamp.bzl", "is_stamping_enabled")
-load(":toolchain_utils.bzl", "get_sysroot_path")
 load(
     ":utils.bzl",
     "expand_dict_value_locations",
@@ -1659,11 +1658,13 @@ def construct_arguments(
             {},
         ))
 
-    # Resolve the sysroot's anchor File lazily so Bazel can map generated paths.
+    # Ensure the sysroot is set for the target platform. Compute the dirname
+    # from the underlying `sysroot_anchor` `File` via `map_each` so Bazel's
+    # path mapping can rewrite it.
     if toolchain._toolchain_generated_sysroot:
         rustc_flags.add_all(
-            [toolchain._sysroot],
-            map_each = get_sysroot_path,
+            [toolchain.sysroot_anchor],
+            map_each = _get_dirname,
             format_each = "--sysroot=%s",
         )
 

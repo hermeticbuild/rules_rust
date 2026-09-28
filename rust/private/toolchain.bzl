@@ -9,13 +9,11 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//rust/platform:triple.bzl", "triple")
 load("//rust/private:common.bzl", "rust_common")
 load("//rust/private:lto.bzl", "RustLtoInfo")
-load("//rust/private:providers.bzl", "SysrootInfo")
 load(
     "//rust/private:rust_allocator_libraries.bzl",
     "make_libstd_and_allocator_ccinfo",
 )
 load("//rust/private:semver.bzl", "semver")
-load("//rust/private:toolchain_utils.bzl", "get_sysroot_path")
 load(
     "//rust/private:utils.bzl",
     "deduplicate",
@@ -108,7 +106,7 @@ def _rust_stdlib_filegroup_impl(ctx):
             panic_files = panic_files,
             has_profiler_builtins = has_profiler_builtins,
             srcs = ctx.attr.srcs,
-            sysroot = _source_stdlib_sysroot(rust_std),
+            sysroot_anchor = ctx.file.sysroot_anchor,
         ),
     ]
 
@@ -120,6 +118,12 @@ rust_stdlib_filegroup = rule(
             allow_files = True,
             doc = "The list of targets/files that are components of the rust-stdlib file group",
             mandatory = True,
+        ),
+        "sysroot_anchor": attr.label(
+            allow_single_file = True,
+            doc = "A file directly in the sysroot root, such as the downloaded repository's BUILD.bazel. " +
+                  "The srcs must provide its standard-library files under lib/rustlib/<target>/lib. " +
+                  "If unset, the compiler uses the toolchain's assembled sysroot.",
         ),
     },
 )
@@ -202,22 +206,6 @@ def _default_runfiles_files(target):
         return None
 
     return target[DefaultInfo].default_runfiles.files
-
-def _source_stdlib_sysroot(files):
-    """Record a source sysroot while the stdlib's file list is available."""
-    if not files:
-        return None
-    root, separator, relative = files[0].path.rpartition("/lib/rustlib/")
-    if not separator or "/lib/" not in relative:
-        return None
-    prefix = root + separator
-    for file in files:
-        if not file.is_source or not file.path.startswith(prefix):
-            return None
-    return SysrootInfo(
-        anchor = files[0],
-        anchor_relative_path = "lib/rustlib/" + relative,
-    )
 
 def _generate_sysroot(
         ctx,
@@ -359,6 +347,10 @@ def _generate_sysroot(
     # Made available to support $(location) expansion in stdlib_linkflags and extra_rustc_flags.
     transitive_file_sets.append(rust_std[DefaultInfo].files)
 
+    # A root-level File keeps sysroot paths compatible with Bazel path mapping.
+    sysroot_anchor = ctx.actions.declare_file("{}/rust.sysroot".format(name))
+    ctx.actions.write(sysroot_anchor, "")
+
     # Create a depset of all sysroot files (symlinks and their real paths)
     all_files = depset(direct_files, transitive = transitive_file_sets)
 
@@ -368,14 +360,11 @@ def _generate_sysroot(
         cargo_clippy = sysroot_cargo_clippy,
         clippy = sysroot_clippy,
         linker = sysroot_linker,
-        root = SysrootInfo(
-            anchor = sysroot_rustc,
-            anchor_relative_path = "bin/" + rustc.basename,
-        ),
         rustc = sysroot_rustc,
         rustc_lib = sysroot_rustc_lib,
         rustdoc = sysroot_rustdoc,
         rustfmt = sysroot_rustfmt,
+        sysroot_anchor = sysroot_anchor,
     )
 
 def _experimental_use_cc_common_link(ctx):
@@ -478,9 +467,9 @@ def _rust_toolchain_impl(ctx):
     )
 
     # Determine the path and short_path of the sysroot
-    stdlib_sysroot = getattr(rust_std[rust_common.stdlib_info], "sysroot", None) or sysroot.root
-    sysroot_path = get_sysroot_path(stdlib_sysroot)
-    sysroot_short_path = stdlib_sysroot.anchor.short_path.removesuffix("/" + stdlib_sysroot.anchor_relative_path)
+    sysroot_anchor = getattr(rust_std[rust_common.stdlib_info], "sysroot_anchor", None) or sysroot.sysroot_anchor
+    sysroot_path = sysroot_anchor.dirname
+    sysroot_short_path = sysroot_anchor.short_path.rpartition("/")[0]
 
     # Variables for make variable expansion
     make_variables = {
@@ -662,8 +651,8 @@ def _rust_toolchain_impl(ctx):
         process_wrapper = ctx.executable.process_wrapper if ctx.attr.process_wrapper else None,
         per_crate_rustc_flags = ctx.attr.per_crate_rustc_flags,
         sysroot = sysroot_path,
+        sysroot_anchor = sysroot_anchor,
         sysroot_short_path = sysroot_short_path,
-        _sysroot = stdlib_sysroot,
         target_arch = target_arch,
         target_flag_value = target_json if target_json else target_triple.str,
         target_json = target_json,

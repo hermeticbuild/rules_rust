@@ -15,7 +15,7 @@ def _stdlib_without_sysroot_impl(ctx):
         rust_common.stdlib_info(**{
             field: getattr(info, field)
             for field in dir(info)
-            if field != "sysroot"
+            if field != "sysroot_anchor"
         }),
     ]
 
@@ -59,8 +59,8 @@ def _toolchain_keeps_generated_stdlib_sysroot_test_impl(ctx):
     env = analysistest.begin(ctx)
     toolchain_info = analysistest.target_under_test(env)[platform_common.ToolchainInfo]
 
-    # Even a conventional lib/rustlib layout must be assembled when its
-    # contents are generated, rather than downloaded source artifacts.
+    # Without an explicit anchor, even a conventional lib/rustlib layout
+    # uses the toolchain's assembled root.
     asserts.equals(env, toolchain_info.rustc.dirname.rpartition("/")[0], toolchain_info.sysroot)
 
     return analysistest.end(env)

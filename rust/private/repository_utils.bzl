@@ -345,6 +345,7 @@ rust_stdlib_filegroup(
         # Some patterns (e.g. `lib/*.a`) don't match anything, see https://github.com/bazelbuild/rules_rust/pull/245
         allow_empty = True,
     ),
+    sysroot_anchor = ":BUILD.bazel",
     visibility = ["//visibility:public"],
 )
 
