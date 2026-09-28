@@ -128,6 +128,15 @@ RustcOutputDiagnosticsInfo = provider(
     },
 )
 
+SysrootInfo = provider(
+    doc = "A standard-library sysroot located by an anchor File for path mapping.",
+    fields = {
+        "anchor": "File: A file within the sysroot.",
+        "anchor_relative_path": "str: The anchor's path relative to the sysroot root.",
+        "files": "depset[File]: Standard-library files within the sysroot.",
+    },
+)
+
 StdLibInfo = provider(
     doc = (
         "A collection of files either found within the `rust-stdlib` artifact or " +
@@ -147,6 +156,7 @@ StdLibInfo = provider(
         "std_dylib": "File: libstd.so file",
         "std_files": "Depset[File]: `.a` files associated with the `std` module.",
         "std_rlibs": "List[File]: All `.rlib` files",
+        "sysroot": "SysrootInfo or None: A source sysroot containing the standard-library files.",
         "test_files": "Depset[File]: `.a` files associated with the `test` module.",
     },
 )

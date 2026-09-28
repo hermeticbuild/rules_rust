@@ -45,6 +45,7 @@ load(
 )
 load(":rustc_resource_set.bzl", "get_rustc_resource_set", "is_codegen_units_enabled")
 load(":stamp.bzl", "is_stamping_enabled")
+load(":toolchain_utils.bzl", "get_sysroot_path")
 load(
     ":utils.bzl",
     "expand_dict_value_locations",
@@ -1658,12 +1659,11 @@ def construct_arguments(
             {},
         ))
 
-    # Derive the sysroot from a File so Bazel can map generated paths. The
-    # downloaded stdlib may live in a different repository from the compiler.
+    # Resolve the sysroot's anchor File lazily so Bazel can map generated paths.
     if toolchain._toolchain_generated_sysroot:
         rustc_flags.add_all(
-            [toolchain._stdlib_sysroot_anchor or toolchain.sysroot_anchor],
-            map_each = _get_stdlib_sysroot if toolchain._stdlib_sysroot_anchor else _get_dirname,
+            [toolchain._sysroot],
+            map_each = get_sysroot_path,
             format_each = "--sysroot=%s",
         )
 
@@ -3657,10 +3657,6 @@ def _get_crate_root_path(args):
         return paths.join(file.path, root_path)
     else:
         return file.path
-
-def _get_stdlib_sysroot(file):
-    """Return the root containing a source `lib/rustlib/<target>/lib` tree."""
-    return file.path.rpartition("/lib/rustlib/")[0]
 
 def _get_dirname(file):
     """A helper function for `_add_native_link_flags`.

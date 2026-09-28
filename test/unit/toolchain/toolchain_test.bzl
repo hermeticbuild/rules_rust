@@ -3,8 +3,26 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_rust_toolchain_test_target_json//:defs.bzl", "TARGET_JSON")
+load("//rust:defs.bzl", "rust_common")
 load("//rust:toolchain.bzl", "rust_stdlib_filegroup", "rust_toolchain")
 load("//rust/platform:triple.bzl", "triple")
+
+def _stdlib_without_sysroot_impl(ctx):
+    target = ctx.attr.stdlib
+    info = target[rust_common.stdlib_info]
+    return [
+        target[DefaultInfo],
+        rust_common.stdlib_info(**{
+            field: getattr(info, field)
+            for field in dir(info)
+            if field != "sysroot"
+        }),
+    ]
+
+_stdlib_without_sysroot = rule(
+    implementation = _stdlib_without_sysroot_impl,
+    attrs = {"stdlib": attr.label(providers = [rust_common.stdlib_info])},
+)
 
 def _toolchain_specifies_target_triple_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -120,6 +138,10 @@ def _define_test_targets():
         name = "std_libs",
         srcs = [":stdlib_srcs"],
     )
+    _stdlib_without_sysroot(
+        name = "legacy_std_libs",
+        stdlib = ":std_libs",
+    )
 
     write_file(
         name = "generated_stdlib",
@@ -185,7 +207,7 @@ def _define_test_targets():
         dylib_ext = ".so",
         exec_triple = "x86_64-unknown-none",
         rust_doc = ":mock_rustdoc",
-        rust_std = ":std_libs",
+        rust_std = ":legacy_std_libs",
         rustc = ":mock_rustc",
         process_wrapper = "@rules_rust//util/process_wrapper",
         linker = ":mock_rust_lld",

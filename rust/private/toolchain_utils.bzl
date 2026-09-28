@@ -1,5 +1,16 @@
 """A module defining toolchain utilities"""
 
+def get_sysroot_path(sysroot):
+    """Resolve a sysroot using its anchor's current (possibly mapped) path.
+
+    Args:
+        sysroot (SysrootInfo): The sysroot to locate.
+
+    Returns:
+        str: The sysroot directory.
+    """
+    return sysroot.anchor.path.removesuffix("/" + sysroot.anchor_relative_path)
+
 def _toolchain_files_impl(ctx):
     toolchain = ctx.toolchains[str(Label("//rust:toolchain_type"))]
 
