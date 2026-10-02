@@ -3510,11 +3510,15 @@ def _get_make_link_flag_funcs(target_os, target_abi, use_direct_link_driver):
 
     return (make_link_flags, get_lib_name)
 
-def _libraries_dirnames(make_link_flags_args):
-    link_input, use_pic, _, _, _ = make_link_flags_args
+def _libraries_dirnames(linker_input, use_pic):
+    return [get_preferred_artifact(lib, use_pic).dirname for lib in linker_input.libraries]
 
-    # De-duplicate names.
-    return depset([get_preferred_artifact(lib, use_pic).dirname for lib in link_input.libraries]).to_list()
+# Reuse these callbacks so Bazel can share depset fingerprints between actions.
+def _libraries_dirnames_pic(linker_input):
+    return _libraries_dirnames(linker_input, True)
+
+def _libraries_dirnames_no_pic(linker_input):
+    return _libraries_dirnames(linker_input, False)
 
 def _add_native_link_flags(
         args,
@@ -3567,9 +3571,12 @@ def _add_native_link_flags(
     )
     static_runtime_link_format = "-Clink-arg=-l%s" if link_libraries_as_link_args else "-lstatic=%s"
 
-    # TODO(hlopko): Remove depset flattening by using lambdas once we are on >=Bazel 5.0
-    make_link_flags_args = [(arg, use_pic, ambiguous_libs, include_link_flags, link_libraries_as_link_args) for arg in dep_info.transitive_noncrates.to_list()]
-    args.add_all(make_link_flags_args, map_each = _libraries_dirnames, uniquify = True, format_each = "-Lnative=%s")
+    args.add_all(
+        dep_info.transitive_noncrates,
+        map_each = _libraries_dirnames_pic if use_pic else _libraries_dirnames_no_pic,
+        uniquify = True,
+        format_each = "-Lnative=%s",
+    )
     if ambiguous_libs:
         # If there are ambiguous libs, the disambiguation symlinks to them are
         # all created in the same directory. Add it to the library search
@@ -3584,7 +3591,19 @@ def _add_native_link_flags(
             format_each = "-Lnative=%s",
         )
 
-    args.add_all(make_link_flags_args, map_each = make_link_flags)
+    # Construct each input's tuple during expansion instead of retaining all
+    # tuples in Args. The closure captures only the callback and shared options.
+    args.add_all(
+        dep_info.transitive_noncrates,
+        map_each = lambda linker_input: make_link_flags((
+            linker_input,
+            use_pic,
+            ambiguous_libs,
+            include_link_flags,
+            link_libraries_as_link_args,
+        )),
+        allow_closure = True,
+    )
 
     args.add_all(linkstamp_outs, format_each = "-Clink-args=%s")
 
