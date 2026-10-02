@@ -655,7 +655,7 @@ def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
       use_pic: (boolean): Whether the build should use PIC.
 
     Returns:
-      dict[String, File]: A mapping from ambiguous library paths to their
+      dict[File, File]: A mapping from ambiguous library artifacts to their
         disambiguating symlink.
     """
     # FIXME: Once the relative order part of the native-link-modifiers rustc
@@ -663,8 +663,8 @@ def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
     # symlinks by passing the full paths to the libraries.
     # https://github.com/rust-lang/rust/issues/81490.
 
-    # A dictionary from file paths of ambiguous libraries to the corresponding
-    # symlink.
+    # A dictionary from ambiguous library artifacts to their corresponding
+    # symlinks.
     ambiguous_libs = {}
 
     # A dictionary maintaining a mapping from preferred library name to the
@@ -703,17 +703,14 @@ def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
                 (name in visited_libs and visited_libs[name].path != artifact.path)
             ):
                 # Disambiguate the previously visited library (if we just detected
-                # that it is ambiguous) and the current library. Key the
-                # `ambiguous_libs` dict on `short_path` (root-relative,
-                # configuration-independent) rather than `path` so that the
-                # lookup in `portable_link_flags` keeps matching when path
-                # mapping rewrites `.path` to the `bazel-out/cfg/bin/...`
-                # prefix at argv-expansion time.
+                # that it is ambiguous) and the current library. Key by `File`
+                # identity to distinguish configurations without depending on
+                # exec paths rewritten by Bazel's path mapping.
                 if name in visited_libs:
-                    old_short_path = visited_libs[name].short_path
-                    if old_short_path not in ambiguous_libs:
-                        ambiguous_libs[old_short_path] = symlink_for_ambiguous_lib(actions, toolchain, crate_info, visited_libs[name])
-                ambiguous_libs[artifact.short_path] = symlink_for_ambiguous_lib(actions, toolchain, crate_info, artifact)
+                    old_artifact = visited_libs[name]
+                    if old_artifact not in ambiguous_libs:
+                        ambiguous_libs[old_artifact] = symlink_for_ambiguous_lib(actions, toolchain, crate_info, old_artifact)
+                ambiguous_libs[artifact] = symlink_for_ambiguous_lib(actions, toolchain, crate_info, artifact)
 
             visited_libs[name] = artifact
     return ambiguous_libs
@@ -815,7 +812,7 @@ def collect_inputs(
             - (File): An optional path to a generated environment file from a `cargo_build_script` target
             - (depset[File]): All direct and transitive build flag files from the current build info
             - (list[File]): Linkstamp outputs
-            - (dict[String, File]): Ambiguous libs, see `_disambiguate_libs`.
+            - (dict[File, File]): Ambiguous libs, see `_disambiguate_libs`.
     """
     linker_script = getattr(file, "linker_script", None)
 
@@ -3323,8 +3320,8 @@ def portable_link_flags(
         _type_: _description_
     """
     artifact = get_preferred_artifact(lib, use_pic)
-    if ambiguous_libs and artifact.short_path in ambiguous_libs:
-        artifact = ambiguous_libs[artifact.short_path]
+    if ambiguous_libs and artifact in ambiguous_libs:
+        artifact = ambiguous_libs[artifact]
     if lib.static_library or lib.pic_static_library:
         # To ensure appropriate linker library argument order, in the presence
         # of both native libraries that depend on rlibs and rlibs that depend

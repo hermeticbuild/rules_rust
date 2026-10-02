@@ -1,6 +1,8 @@
 """Unittests for ambiguous native dependencies."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
+load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load(
     "//rust:defs.bzl",
     "rust_binary",
@@ -52,6 +54,31 @@ ambiguous_deps_test = analysistest.make(
     },
 )
 
+def _native_dep_configurations_transition_impl(_settings, _attr):
+    return [
+        {"//command_line_option:copt": ["-DNATIVE_DEP_CONFIGURATION=1"]},
+        {"//command_line_option:copt": ["-DNATIVE_DEP_CONFIGURATION=2"]},
+    ]
+
+_native_dep_configurations_transition = transition(
+    implementation = _native_dep_configurations_transition_impl,
+    inputs = [],
+    outputs = ["//command_line_option:copt"],
+)
+
+def _native_dep_configurations_impl(ctx):
+    return [cc_common.merge_cc_infos(cc_infos = [dep[CcInfo] for dep in ctx.attr.dep])]
+
+_native_dep_configurations = rule(
+    implementation = _native_dep_configurations_impl,
+    attrs = {
+        "dep": attr.label(cfg = _native_dep_configurations_transition),
+        "_allowlist_function_transition": attr.label(
+            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+        ),
+    },
+)
+
 def _create_test_targets():
     rust_library(
         name = "rlib_with_ambiguous_deps",
@@ -68,6 +95,19 @@ def _create_test_targets():
         srcs = ["bin.rs"],
         edition = "2018",
         deps = [":rlib_with_ambiguous_deps"],
+    )
+
+    # The two configurations produce distinct archives with the same short_path.
+    _native_dep_configurations(
+        name = "native_dep_configurations",
+        dep = "//test/unit/ambiguous_libs/first_dep:native_dep",
+    )
+
+    rust_binary(
+        name = "binary_with_native_dep_configurations",
+        srcs = ["bin.rs"],
+        edition = "2018",
+        deps = [":native_dep_configurations"],
     )
 
     rust_proc_macro(
@@ -96,6 +136,10 @@ def _create_test_targets():
         target_under_test = ":binary",
     )
     ambiguous_deps_test(
+        name = "bin_with_native_dep_configurations_test",
+        target_under_test = ":binary_with_native_dep_configurations",
+    )
+    ambiguous_deps_test(
         name = "staticlib_with_ambiguous_deps_test",
         target_under_test = ":static_library",
     )
@@ -120,6 +164,7 @@ def ambiguous_libs_test_suite(name):
         name = name,
         tests = [
             ":bin_with_ambiguous_deps_test",
+            ":bin_with_native_dep_configurations_test",
             ":staticlib_with_ambiguous_deps_test",
             ":proc_macro_with_ambiguous_deps_test",
             ":cdylib_with_ambiguous_deps_test",
