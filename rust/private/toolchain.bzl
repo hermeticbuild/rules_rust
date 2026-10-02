@@ -6,6 +6,7 @@ Toolchain rules for Rust.
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_cc//cc/common:cc_shared_library_hint_info.bzl", "CcSharedLibraryHintInfo")
 load("//rust/platform:triple.bzl", "triple")
 load("//rust/private:common.bzl", "rust_common")
 load("//rust/private:lto.bzl", "RustLtoInfo")
@@ -86,6 +87,8 @@ def _rust_stdlib_filegroup_impl(ctx):
             break
 
     return [
+        # The toolchain creates native linker inputs owned by this target.
+        CcSharedLibraryHintInfo(attributes = []),
         DefaultInfo(
             files = depset(ctx.files.srcs),
             runfiles = ctx.runfiles(ctx.files.srcs),
@@ -111,6 +114,7 @@ def _rust_stdlib_filegroup_impl(ctx):
 rust_stdlib_filegroup = rule(
     doc = "A dedicated filegroup-like rule for Rust stdlib artifacts.",
     implementation = _rust_stdlib_filegroup_impl,
+    provides = [CcSharedLibraryHintInfo],
     attrs = {
         "srcs": attr.label_list(
             allow_files = True,
@@ -701,6 +705,7 @@ def _rust_toolchain_impl(ctx):
 
 rust_toolchain = rule(
     implementation = _rust_toolchain_impl,
+    provides = [platform_common.ToolchainInfo],
     fragments = ["cpp"],
     attrs = {
         "allocator_library": attr.label(

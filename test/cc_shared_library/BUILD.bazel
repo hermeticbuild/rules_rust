@@ -1,6 +1,6 @@
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library", "cc_test")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_static_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_static_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 rust_static_library(
@@ -33,6 +33,38 @@ cc_test(
     },
     linkstatic = True,
     deps = [":c_lib"],
+)
+
+rust_library(
+    name = "rust_rlib",
+    srcs = ["lib.rs"],
+    edition = "2021",
+)
+
+cc_library(
+    name = "c_lib_with_rlib",
+    srcs = ["lib.c"],
+    hdrs = ["lib.h"],
+    deps = [":rust_rlib"],
+)
+
+# rust_library exposes its rlib and the Rust standard library as linker inputs.
+# cc_shared_library must visit both rust_library and its Rust toolchain.
+cc_shared_library(
+    name = "shared_with_rlib",
+    deps = [":c_lib_with_rlib"],
+)
+
+cc_test(
+    name = "test_with_rlib",
+    srcs = ["main.c"],
+    dynamic_deps = [":shared_with_rlib"],
+    env = {
+        # TODO: https://github.com/bazelbuild/rules_cc/issues/613
+        "IGNORE_COVERAGE_COLLECTION_FAILURES": "1",
+    },
+    linkstatic = True,
+    deps = [":c_lib_with_rlib"],
 )
 
 NOT_WINDOWS = select({

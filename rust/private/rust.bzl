@@ -1093,7 +1093,9 @@ _RUST_TEST_ATTRS = {
 
 rust_library = rule(
     implementation = _rust_library_impl,
-    provides = COMMON_PROVIDERS,
+    # cc_shared_library's graph aspect only visits advertised providers.
+    # rust_library already returns CcInfo for its rlib and native dependencies.
+    provides = COMMON_PROVIDERS + [CcInfo],
     cfg = per_crate_flag_trim_transition,
     attrs = _COMMON_ATTRS | {
         "disable_pipelining": attr.bool(
