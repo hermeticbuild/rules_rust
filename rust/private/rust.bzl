@@ -754,6 +754,11 @@ _COMMON_ATTRS = {
         """),
         default = False,
     ),
+    "clippy_config": attr.label(
+        doc = "Optional clippy.toml or .clippy.toml file for this crate. Overrides the global clippy.toml setting.",
+        allow_single_file = True,
+        default = Label("//rust/settings:clippy.toml"),
+    ),
     "compile_data": attr.label_list(
         doc = dedent("""\
             List of files used by this rule at compile time.

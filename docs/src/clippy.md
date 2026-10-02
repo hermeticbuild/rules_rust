@@ -27,6 +27,16 @@ the upstream implementation of clippy, this file must be named either `.clippy.t
 build --@rules_rust//rust/settings:clippy.toml=//:clippy.toml
 ```
 
+To override the global configuration for one crate, set its `clippy_config` attribute:
+
+```python
+rust_library(
+    name = "my_library",
+    srcs = ["src/lib.rs"],
+    clippy_config = ":clippy.toml",
+)
+```
+
 ## Rules
 
 - [rust_clippy](./rust_clippy.md) — Rule that runs `clippy-driver` against a Rust target and

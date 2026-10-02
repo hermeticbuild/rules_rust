@@ -293,7 +293,7 @@ def _clippy_aspect_impl(target, ctx):
         ctx = ctx,
         clippy_executable = toolchain.clippy_driver,
         crate_info = crate_info,
-        config = ctx.file._config,
+        config = getattr(ctx.rule.file, "clippy_config", None) or ctx.file._config,
         output = clippy_out,
         cap_at_warnings = clippy_out != None or clippy_diagnostics != None,  # Collecting output for a tool -> cap so the build continues.
         success_marker = clippy_success_marker,

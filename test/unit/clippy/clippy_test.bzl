@@ -1,8 +1,19 @@
 """Unittest to verify properties of clippy rules"""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("//rust:defs.bzl", "rust_clippy_aspect")
+load("//rust:defs.bzl", "rust_clippy_aspect", "rust_library")
+load("//rust:rust_common.bzl", "rust_common")
 load("//test/unit:common.bzl", "assert_argv_contains", "assert_argv_contains_prefix_suffix")
+
+def _custom_crate_impl(ctx):
+    return [ctx.attr.crate[rust_common.crate_info]]
+
+_custom_crate = rule(
+    doc = "Forwards CrateInfo without defining clippy_config.",
+    implementation = _custom_crate_impl,
+    attrs = {"crate": attr.label(providers = [rust_common.crate_info])},
+    provides = [rust_common.crate_info],
+)
 
 def _find_clippy_action(actions):
     for action in actions:
@@ -156,12 +167,41 @@ clippy_aspect_with_dynamic_std_test = make_clippy_aspect_unittest(
     },
 )
 
+def _clippy_aspect_config_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    action = _find_clippy_action(analysistest.target_under_test(env).actions)
+    asserts.true(env, ctx.file.expected_config in action.inputs.to_list())
+    asserts.equals(env, "${pwd}/%s" % ctx.file.expected_config.dirname, action.env["CLIPPY_CONF_DIR"])
+    return analysistest.end(env)
+
+clippy_aspect_config_test = make_clippy_aspect_unittest(
+    _clippy_aspect_config_test_impl,
+    attrs = {"expected_config": attr.label(allow_single_file = True)},
+    config_settings = {
+        str(Label("//rust/settings:clippy.toml")): str(Label("//test/clippy/too_many_args:clippy.toml")),
+    },
+)
+
 def clippy_test_suite(name):
     """Entry-point macro called from the BUILD file.
 
     Args:
         name (str): Name of the macro.
     """
+
+    rust_library(
+        name = "library_with_clippy_config",
+        srcs = [Label("//test/clippy:src/lib.rs")],
+        clippy_config = Label("//rust/settings:.clippy.toml"),
+        edition = "2018",
+        tags = ["manual"],
+    )
+
+    _custom_crate(
+        name = "custom_crate",
+        crate = ":library_with_clippy_config",
+        tags = ["manual"],
+    )
 
     binary_clippy_aspect_action_has_warnings_flag_test(
         name = "binary_clippy_aspect_action_has_warnings_flag_test",
@@ -208,6 +248,22 @@ def clippy_test_suite(name):
         target_under_test = Label("//test/clippy:ok_library"),
     )
 
+    clippy_aspect_config_test(
+        name = "clippy_aspect_global_config_test",
+        expected_config = Label("//test/clippy/too_many_args:clippy.toml"),
+        target_under_test = Label("//test/clippy:ok_library"),
+    )
+    clippy_aspect_config_test(
+        name = "clippy_aspect_per_crate_config_test",
+        expected_config = Label("//rust/settings:.clippy.toml"),
+        target_under_test = ":library_with_clippy_config",
+    )
+    clippy_aspect_config_test(
+        name = "clippy_aspect_custom_crate_config_test",
+        expected_config = Label("//test/clippy/too_many_args:clippy.toml"),
+        target_under_test = ":custom_crate",
+    )
+
     native.test_suite(
         name = name,
         tests = [
@@ -221,5 +277,8 @@ def clippy_test_suite(name):
             ":clippy_aspect_with_clippy_error_format_test",
             ":clippy_aspect_with_output_diagnostics_test",
             ":clippy_aspect_with_dynamic_std_test",
+            ":clippy_aspect_global_config_test",
+            ":clippy_aspect_per_crate_config_test",
+            ":clippy_aspect_custom_crate_config_test",
         ],
     )
