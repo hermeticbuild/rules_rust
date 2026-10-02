@@ -474,6 +474,9 @@ def extra_rustc_flag():
     _extra_rustc_flag(
         name = "extra_rustc_flag",
         build_setting_default = [],
+        # extra_rustc_flag is unused in exec configurations. Drop it before
+        # analyzing their toolchains, build scripts, and proc macros.
+        scope = "target",
     )
 
 # buildifier: disable=unnamed-macro

@@ -3818,6 +3818,7 @@ extra_rustc_flag = rule(
     ),
     implementation = _extra_rustc_flag_impl,
     build_setting = config.string_list(flag = True, repeatable = True),
+    attrs = {"scope": attr.string()},
 )
 
 def _extra_exec_rustc_flags_impl(ctx):

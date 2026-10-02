@@ -110,5 +110,6 @@ def extra_rustc_flags_test_suite(name):
         tests = [
             ":extra_rustc_flags_not_present_test",
             ":extra_rustc_flags_present_test",
+            ":extra_rustc_flag_present_test",
         ],
     )
