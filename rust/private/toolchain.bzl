@@ -86,12 +86,13 @@ def _rust_stdlib_filegroup_impl(ctx):
             std_dylib = file
             break
 
+    files = depset(rust_std)
     return [
         # The toolchain creates native linker inputs owned by this target.
         CcSharedLibraryHintInfo(attributes = []),
         DefaultInfo(
-            files = depset(ctx.files.srcs),
-            runfiles = ctx.runfiles(ctx.files.srcs),
+            files = files,
+            runfiles = ctx.runfiles(transitive_files = files),
         ),
         rust_common.stdlib_info(
             std_rlibs = std_rlibs,
@@ -108,6 +109,7 @@ def _rust_stdlib_filegroup_impl(ctx):
             panic_files = panic_files,
             has_profiler_builtins = has_profiler_builtins,
             srcs = ctx.attr.srcs,
+            sysroot_anchor = ctx.file.sysroot_anchor,
         ),
     ]
 
@@ -120,6 +122,12 @@ rust_stdlib_filegroup = rule(
             allow_files = True,
             doc = "The list of targets/files that are components of the rust-stdlib file group",
             mandatory = True,
+        ),
+        "sysroot_anchor": attr.label(
+            allow_single_file = True,
+            doc = "A file directly in the sysroot root, such as the downloaded repository's BUILD.bazel. " +
+                  "The srcs must provide its standard-library files under lib/rustlib/<target>/lib. " +
+                  "If unset, the compiler uses the toolchain's assembled sysroot.",
         ),
     },
 )
@@ -208,6 +216,7 @@ def _generate_sysroot(
         rustc,
         rustdoc,
         rustc_lib,
+        rust_std,
         cargo = None,
         cargo_runfiles = None,
         clippy = None,
@@ -215,7 +224,6 @@ def _generate_sysroot(
         cargo_clippy = None,
         cargo_clippy_runfiles = None,
         llvm_tools = None,
-        rust_std = None,
         rustfmt = None,
         rustfmt_runfiles = None,
         linker = None,
@@ -234,7 +242,7 @@ def _generate_sysroot(
         clippy (File, optional): The path to a `clippy-driver` executable.
         clippy_runfiles (depset[File], optional): Runtime files for `clippy-driver`.
         llvm_tools (Target, optional): A collection of llvm tools used by `rustc`.
-        rust_std (Target, optional): A collection of Files containing Rust standard library components.
+        rust_std (Target): A collection of Files containing Rust standard library components.
         rustfmt (File, optional): The path to a `rustfmt` executable.
         rustfmt_runfiles (depset[File], optional): Runtime files for `rustfmt`.
         linker (Target, optional): The linker target (e.g. `rust-lld`).
@@ -338,31 +346,14 @@ def _generate_sysroot(
         transitive_file_sets.extend([sysroot_llvm_tools])
 
     # Rust standard library
-    sysroot_rust_std = None
-    if rust_std:
-        sysroot_rust_std = _symlink_sysroot_tree(ctx, name, rust_std)
-        transitive_file_sets.extend([sysroot_rust_std])
+    transitive_file_sets.append(_symlink_sysroot_tree(ctx, name, rust_std))
 
-        # Made available to support $(location) expansion in stdlib_linkflags and extra_rustc_flags.
-        transitive_file_sets.append(depset(ctx.files.rust_std))
+    # Made available to support $(location) expansion in stdlib_linkflags and extra_rustc_flags.
+    transitive_file_sets.append(rust_std[DefaultInfo].files)
 
-    # Declare a file in the root of the sysroot to make locating the sysroot easy
+    # A root-level File keeps sysroot paths compatible with Bazel path mapping.
     sysroot_anchor = ctx.actions.declare_file("{}/rust.sysroot".format(name))
-    ctx.actions.write(
-        output = sysroot_anchor,
-        content = "\n".join([
-            "cargo: {}".format(cargo),
-            "clippy: {}".format(clippy),
-            "cargo-clippy: {}".format(cargo_clippy),
-            "linker: {}".format(linker),
-            "llvm_tools: {}".format(llvm_tools),
-            "rust_std: {}".format(rust_std),
-            "rustc_lib: {}".format(rustc_lib),
-            "rustc: {}".format(rustc),
-            "rustdoc: {}".format(rustdoc),
-            "rustfmt: {}".format(rustfmt),
-        ]),
-    )
+    ctx.actions.write(sysroot_anchor, "")
 
     # Create a depset of all sysroot files (symlinks and their real paths)
     all_files = depset(direct_files, transitive = transitive_file_sets)
@@ -373,7 +364,6 @@ def _generate_sysroot(
         cargo_clippy = sysroot_cargo_clippy,
         clippy = sysroot_clippy,
         linker = sysroot_linker,
-        rust_std = sysroot_rust_std,
         rustc = sysroot_rustc,
         rustc_lib = sysroot_rustc_lib,
         rustdoc = sysroot_rustdoc,
@@ -481,8 +471,9 @@ def _rust_toolchain_impl(ctx):
     )
 
     # Determine the path and short_path of the sysroot
-    sysroot_path = sysroot.sysroot_anchor.dirname
-    sysroot_short_path, _, _ = sysroot.sysroot_anchor.short_path.rpartition("/")
+    sysroot_anchor = getattr(rust_std[rust_common.stdlib_info], "sysroot_anchor", None) or sysroot.sysroot_anchor
+    sysroot_path = sysroot_anchor.dirname
+    sysroot_short_path = sysroot_anchor.short_path.rpartition("/")[0]
 
     # Variables for make variable expansion
     make_variables = {
@@ -616,16 +607,13 @@ def _rust_toolchain_impl(ctx):
             link_std_dylib,
         )
 
-    # C++ toolchain inputs are attached to the Rust actions that use them.
-    all_files_depsets = [sysroot.all_files]
-
     # Parse the version string once so downstream rules can branch on the
     # semver components without re-parsing. `None` for empty or non-semver
     # values (e.g. unset, or channel labels like "nightly" without a version).
     version_semver = semver(ctx.attr.version) if _is_semver_string(ctx.attr.version) else None
 
     toolchain = platform_common.ToolchainInfo(
-        all_files = depset(transitive = all_files_depsets),
+        all_files = sysroot.all_files,
         binary_ext = ctx.attr.binary_ext,
         cargo = sysroot.cargo,
         channel = ctx.attr.channel,
@@ -654,9 +642,8 @@ def _rust_toolchain_impl(ctx):
         lto = lto,
         make_variables = make_variable_info,
         rust_doc = sysroot.rustdoc,
-        rust_std = sysroot.rust_std,
+        rust_std = rust_std[DefaultInfo].files,
         rust_std_dylib = ctx.attr.rust_std[rust_common.stdlib_info].std_dylib,
-        rust_std_paths = depset([file.dirname for file in sysroot.rust_std.to_list()]),
         rustc = sysroot.rustc,
         rustc_lib = sysroot.rustc_lib,
         rustfmt = sysroot.rustfmt,
@@ -668,7 +655,7 @@ def _rust_toolchain_impl(ctx):
         process_wrapper = ctx.executable.process_wrapper if ctx.attr.process_wrapper else None,
         per_crate_rustc_flags = ctx.attr.per_crate_rustc_flags,
         sysroot = sysroot_path,
-        sysroot_anchor = sysroot.sysroot_anchor,
+        sysroot_anchor = sysroot_anchor,
         sysroot_short_path = sysroot_short_path,
         target_arch = target_arch,
         target_flag_value = target_json if target_json else target_triple.str,
@@ -995,10 +982,7 @@ rust_toolchain = rule(
         ),
         "_toolchain_generated_sysroot": attr.label(
             default = Label("//rust/settings:toolchain_generated_sysroot"),
-            doc = (
-                "Label to a boolean build setting that lets the rule knows whether to set --sysroot to rustc. " +
-                "This flag is only relevant when used together with --@rules_rust//rust/settings:toolchain_generated_sysroot."
-            ),
+            doc = "Whether compiler invocations receive an explicit --sysroot argument.",
         ),
     },
     toolchains = [

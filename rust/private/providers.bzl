@@ -147,6 +147,7 @@ StdLibInfo = provider(
         "std_dylib": "File: libstd.so file",
         "std_files": "Depset[File]: `.a` files associated with the `std` module.",
         "std_rlibs": "List[File]: All `.rlib` files",
+        "sysroot_anchor": "File or None: A file directly in the root of a complete standard-library sysroot.",
         "test_files": "Depset[File]: `.a` files associated with the `test` module.",
     },
 )
