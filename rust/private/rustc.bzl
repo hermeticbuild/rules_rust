@@ -640,7 +640,7 @@ def symlink_for_ambiguous_lib(actions, toolchain, crate_info, lib):
     )
     return symlink
 
-def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
+def _disambiguate_libs(actions, toolchain, crate_info, linker_inputs, use_pic):
     """Constructs disambiguating symlinks for ambiguous library dependencies.
 
     The symlinks are all created in a _ambiguous_libs/ subfolder specific to
@@ -651,7 +651,7 @@ def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
       actions (Actions): The rule's context actions object.
       toolchain: The Rust toolchain object.
       crate_info (CrateInfo): The target crate's info.
-      dep_info: (DepInfo): The target crate's dependency info.
+      linker_inputs (list[LinkerInput]): The target crate's native linker inputs.
       use_pic: (boolean): Whether the build should use PIC.
 
     Returns:
@@ -670,7 +670,7 @@ def _disambiguate_libs(actions, toolchain, crate_info, dep_info, use_pic):
     # A dictionary maintaining a mapping from preferred library name to the
     # last visited artifact with that name.
     visited_libs = {}
-    for link_input in dep_info.transitive_noncrates.to_list():
+    for link_input in linker_inputs:
         for lib in link_input.libraries:
             # FIXME: Dynamic libs are not disambiguated right now, there are
             # cases where those have a non-standard name with version (e.g.,
@@ -853,7 +853,7 @@ def collect_inputs(
     ambiguous_libs = {}
     if is_linking_action:
         linker_inputs = dep_info.transitive_noncrates.to_list()
-        ambiguous_libs = _disambiguate_libs(ctx.actions, toolchain, crate_info, dep_info, use_pic)
+        ambiguous_libs = _disambiguate_libs(ctx.actions, toolchain, crate_info, linker_inputs, use_pic)
         libs_from_linker_inputs = _collect_libs_from_linker_inputs(linker_inputs, use_pic) + [
             additional_input
             for linker_input in linker_inputs
