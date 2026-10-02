@@ -320,7 +320,10 @@ def _create_single_crate(ctx, attrs, info):
     # macro like include_bytes!. Other use cases might exist that require more complex logic.
     expand_targets = deduplicate(concat([getattr(attrs, attr, []) for attr in ["data", "compile_data"]]))
 
-    crate["env"].update({k: ctx.expand_location(v, expand_targets) for k, v in info.env.items()})
+    crate["env"].update({
+        k: ctx.expand_location(v, expand_targets) if "$(" in v else v
+        for k, v in info.env.items()
+    })
 
     # Omit when a crate appears to depend on itself (e.g. foo_test crates).
     # It can happen a single source file is present in multiple crates - there can
