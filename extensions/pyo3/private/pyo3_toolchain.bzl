@@ -29,6 +29,11 @@ def _pyo3_toolchain_impl(ctx):
         version_info.minor,
     )
 
+    # PyO3 uses a trailing t in PYO3_CROSS_PYTHON_VERSION to select the
+    # free-threaded ABI when PYO3_NO_PYTHON disables interpreter detection.
+    if "t" in getattr(py_runtime, "abi_flags", ""):
+        version += "t"
+
     py_cc_toolchain = ctx.toolchains["@rules_python//python/cc:toolchain_type"].py_cc_toolchain
 
     libs = []
