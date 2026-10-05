@@ -102,7 +102,7 @@ impl TemporaryDirectoryGuard {
 /// Matching on what rustc can actually use within a given `-Ldependency=` directory
 #[cfg(any(windows, test))]
 const CRATE_SEARCH_ARTIFACT_EXTENSIONS: &[&str] =
-    &["rlib", "rmeta", "dll", "lib", "a", "so", "dylib"];
+    &["rlib", "rmeta", "dll", "lib", "so", "dylib"];
 
 #[cfg(any(windows, test))]
 fn is_crate_search_artifact(file_name: &str) -> bool {
@@ -540,6 +540,8 @@ mod test {
             "foo.d",
             "foo.rustc-output",
             "noextension",
+            // The `.a` symlink to an rlib that `rules_rust` makes for `cc_common.link`.
+            "libfoo.a",
         ] {
             assert!(
                 !is_crate_search_artifact(file_name),
@@ -559,7 +561,6 @@ mod test {
             "foo.dll",
             // Import library rustc emits alongside a Windows cdylib.
             "foo.dll.lib",
-            "libfoo.a",
             "FOO.RLIB",
         ] {
             assert!(
