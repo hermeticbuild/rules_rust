@@ -845,3 +845,26 @@ def user_compile_flags_test(name):
         forbidden_cflags = ["-DUSER_CXX_ONLY"],
         forbidden_cxxflags = ["-DUSER_C_ONLY"],
     )
+
+def forwarded_header_paths_test(name):
+    """Tests path rewriting through Clang forwarding options.
+
+    Args:
+        name: Prefix for the generated analysis tests.
+    """
+    for forwarding in ["-Xclang", "-Xpreprocessor"]:
+        for category in ["-internal-isystem", "-internal-externc-isystem"]:
+            for kind, path, expected in [
+                ("relative", "test/relative/include", "${pwd}/test/relative/include"),
+                ("absolute", "/test/absolute/include", "/test/absolute/include"),
+            ]:
+                case = name + forwarding + category + "_" + kind
+                cargo_build_script_with_extra_cc_compile_flags(
+                    name = case + "/cargo_build_script",
+                    extra_cc_compile_flags = [forwarding, category, forwarding, path, "-DKEEP=1"],
+                )
+                cc_args_and_env_analysis_test(
+                    name = case,
+                    target_under_test = case + "/cargo_build_script",
+                    expected_cflags = [forwarding, category, forwarding, expected, "-DKEEP=1"],
+                )
