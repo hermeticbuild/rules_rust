@@ -340,6 +340,11 @@ impl BuildScriptOutput {
         value
             .replace(&format!("{exec_root}/"), "${pwd}/")
             .replace(&format!("{exec_root}\\"), "${pwd}\\")
+            // Flags such as `--remap-path-prefix=<exec_root>=.` (which build
+            // scripts see in CARGO_ENCODED_RUSTFLAGS and may echo back as
+            // `cargo:rustc-env`) follow the exec root with `=`. Leaving it
+            // unredacted bakes the per-action sandbox path into the output.
+            .replace(&format!("{exec_root}="), "${pwd}=")
     }
 
     /// Redact for env vars: uses the generic `${out_dir}` token, resolved
@@ -552,6 +557,25 @@ cargo:rustc-env=valid2=2
         assert_eq!(
             result,
             vec![BuildScriptOutput::DepEnv("VERSION_1_10_0=1".to_owned())]
+        );
+    }
+
+    /// Build scripts that echo `CARGO_ENCODED_RUSTFLAGS` back (e.g. rav1e)
+    /// must not leak the exec root through `--remap-path-prefix=<root>=.`,
+    /// while a sibling path that merely shares the prefix stays untouched.
+    #[test]
+    fn exec_root_followed_by_equals_is_redacted() {
+        let buff = Cursor::new(
+            "
+cargo::rustc-env=CARGO_ENCODED_RUSTFLAGS=--sysroot=/abs/exec_root/sysroot\x1f--remap-path-prefix=/abs/exec_root=.
+cargo::rustc-env=OTHER=/abs/exec_root2/file.rs
+",
+        );
+        let reader = BufReader::new(buff);
+        let result = BuildScriptOutput::outputs_from_reader(reader, true);
+        assert_eq!(
+            BuildScriptOutput::outputs_to_env(&result, "/abs/exec_root", ""),
+            "CARGO_ENCODED_RUSTFLAGS=--sysroot=${pwd}/sysroot\x1f--remap-path-prefix=${pwd}=.\nOTHER=/abs/exec_root2/file.rs"
         );
     }
 
