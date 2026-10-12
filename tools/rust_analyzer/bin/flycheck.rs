@@ -19,6 +19,7 @@
 //! failed" (e.g. BUILD-file syntax error).
 
 use std::{
+    borrow::Cow,
     env, fs,
     io::{self, Write},
     process::{Command, ExitCode},
@@ -468,7 +469,10 @@ fn query_string_for(workspace: &Utf8Path, saved_file: &Utf8Path) -> Result<Strin
 
     // Generate a label that preserves the package-relative file path.
     let pattern = source_file_label(&package, file_rel)?;
-    Ok(format!("attr(srcs, {pattern:?}, //{package}:*)"))
+    Ok(format!(
+        "attr(srcs, {pattern:?}, //{}:*)",
+        to_bazel_separators(&package)
+    ))
 }
 
 /// `bazel query 'attr(srcs, "<file>", //<package>:*)'` scoped to the
@@ -503,7 +507,21 @@ fn source_file_label(package: &Utf8Path, file_rel: &Utf8Path) -> Result<String> 
     let file_in_package = file_rel
         .strip_prefix(package)
         .with_context(|| format!("file {file_rel} is not under Bazel package //{package}"))?;
-    Ok(format!("//{package}:{file_in_package}"))
+    Ok(format!(
+        "//{}:{}",
+        to_bazel_separators(package),
+        to_bazel_separators(file_in_package)
+    ))
+}
+
+fn to_bazel_separators(path: &Utf8Path) -> Cow<'_, str> {
+    match std::path::MAIN_SEPARATOR {
+        // Unix:
+        '/' => path.as_str().into(),
+
+        // Windows:
+        _ => path.as_str().replace(std::path::MAIN_SEPARATOR, "/").into(),
+    }
 }
 
 /// Walk up looking for `BUILD.bazel` or `BUILD`. Returns the
