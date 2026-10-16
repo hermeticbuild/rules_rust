@@ -227,6 +227,21 @@ rust_stdlib_filegroup_provides_runfiles_test = analysistest.make(
     _rust_stdlib_filegroup_provides_runfiles_test_impl,
 )
 
+def _toolchain_uses_repository_sysroot_impl(ctx):
+    """Asserts a downloaded toolchain is used as the sysroot in place, not re-created under bazel-out."""
+    env = analysistest.begin(ctx)
+    rustc_actions = [action for action in analysistest.target_actions(env) if action.mnemonic == "Rustc"]
+    asserts.true(env, len(rustc_actions) > 0, "No Rustc action found")
+
+    for action in rustc_actions:
+        sysroots = [arg for arg in action.argv if arg.startswith("--sysroot=")]
+        asserts.equals(env, 1, len(sysroots), "Expected one --sysroot flag in: {}".format(action.argv))
+        asserts.false(env, sysroots[0].startswith("--sysroot=bazel-out/"), "Sysroot was re-created under bazel-out: {}".format(sysroots[0]))
+
+    return analysistest.end(env)
+
+toolchain_uses_repository_sysroot_test = analysistest.make(_toolchain_uses_repository_sysroot_impl)
+
 def toolchain_test_suite(name):
     """ Instantiates tests for rust toolchains.
 
@@ -250,11 +265,17 @@ def toolchain_test_suite(name):
         target_under_test = ":std_libs",
     )
 
+    toolchain_uses_repository_sysroot_test(
+        name = "toolchain_uses_repository_sysroot_test",
+        target_under_test = ":lib",
+    )
+
     native.test_suite(
         name = name,
         tests = [
             ":toolchain_adds_rustc_flags_lib_test",
             ":toolchain_adds_rustc_flags_shared_lib_test",
             ":rust_stdlib_filegroup_provides_runfiles_test",
+            ":toolchain_uses_repository_sysroot_test",
         ],
     )
