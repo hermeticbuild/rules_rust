@@ -23,6 +23,7 @@ py_test(
 pyo3_extension(
     name = "string_sum_import",
     srcs = ["string_sum_import.rs"],
+    cc_runtime_linkage = "static",
     edition = "2021",
     imports = ["."],
     stubs = True,
