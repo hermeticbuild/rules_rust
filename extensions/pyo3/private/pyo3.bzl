@@ -247,6 +247,7 @@ def pyo3_extension(
         name,
         srcs,
         aliases = {},
+        cc_runtime_linkage = "dynamic",
         compile_data = [],
         crate_features = [],
         crate_root = None,
@@ -277,6 +278,8 @@ def pyo3_extension(
             For more details see [rust_shared_library][rsl].
         aliases (dict, optional): Remap crates to a new name or moniker for linkage to this target.
             For more details see [rust_shared_library][rsl].
+        cc_runtime_linkage (str, optional): How the C++ runtime is linked into the Rust shared library:
+            `"dynamic"` or `"static"`. For more details see [rust_shared_library][rsl].
         compile_data (list, optional): List of files used by this rule at compile time.
             For more details see [rust_shared_library][rsl].
         crate_features (list, optional): List of features to enable for this crate.
@@ -333,6 +336,7 @@ def pyo3_extension(
         name = name + "_shared",
         srcs = srcs,
         aliases = aliases,
+        cc_runtime_linkage = cc_runtime_linkage,
         compile_data = compile_data,
         crate_features = crate_features,
         crate_name = kwargs.pop("crate_name", name),
