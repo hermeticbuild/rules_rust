@@ -412,13 +412,21 @@ _LinkerConfigInfo = provider(fields = [
     "action_name",
     "feature_configuration",
     "is_direct_driver",
+    "msvc_lld_link",
     "rpaths",
     "rust_linker",
     "target_arch",
     "variables",
 ])
 
-def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary):
+def _get_cc_linker_files(cc_toolchain):
+    if not cc_toolchain:
+        return depset()
+    if hasattr(cc_toolchain, "_linker_files"):
+        return cc_toolchain._linker_files
+    return cc_toolchain.linker_files()
+
+def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configuration, rpaths, add_flags_for_binary, for_rustc = False):
     user_link_flags = get_cc_user_link_flags(ctx)
 
     cc_linker = None
@@ -461,6 +469,19 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
     if use_rust_linker and not toolchain.linker:
         fail("No linker available for rustc. Either `rust_toolchain.linker` must be set or a `cc_toolchain` configured for the current configuration.")
 
+    msvc_lld_link = None
+    if for_rustc and not use_rust_linker and toolchain.target_abi == "msvc" and paths.basename(cc_linker).lower() in ("clang-cl", "clang-cl.exe"):
+        # rustc's MSVC linker interface accepts link.exe arguments, not clang-cl
+        # arguments. Use clang-cl's declared lld-link. Leave Cargo's LD unchanged.
+        executable = "lld-link.exe" if cc_linker.lower().endswith(".exe") else "lld-link"
+        linker_path = paths.join(paths.dirname(cc_linker), executable)
+        for file in _get_cc_linker_files(cc_toolchain).to_list():
+            if file.path == linker_path:
+                msvc_lld_link = file
+                break
+        if not msvc_lld_link:
+            fail("Rust MSVC linking requires {} in cc_toolchain.linker_files when the C++ linker is {}. Alternatively, configure a direct MSVC linker in the Rust toolchain.".format(linker_path, cc_linker))
+
     # Keep CcToolchainVariables and the Rust linker File until map_each runs so
     # cc_common and File.path use the Rustc action's path mapper.
     return _LinkerConfigInfo(
@@ -468,7 +489,8 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
         action_name = action_name,
         variables = link_variables,
         rust_linker = toolchain.linker if use_rust_linker else None,
-        is_direct_driver = use_rust_linker and toolchain.linker_type == "direct",
+        msvc_lld_link = msvc_lld_link,
+        is_direct_driver = bool(msvc_lld_link) or (use_rust_linker and toolchain.linker_type == "direct"),
         target_arch = toolchain.target_arch,
         rpaths = rpaths,
     )
@@ -476,6 +498,8 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
 def _get_linker_path(linker_config):
     if linker_config.rust_linker:
         return linker_config.rust_linker.path
+    if linker_config.msvc_lld_link:
+        return linker_config.msvc_lld_link.path
     return cc_common.get_tool_for_action(
         feature_configuration = linker_config.feature_configuration,
         action_name = linker_config.action_name,
@@ -499,7 +523,29 @@ def _get_linker_args(linker_config):
             variables = linker_config.variables,
         ))
 
-    if linker_config.rust_linker:
+    if linker_config.msvc_lld_link:
+        # clang-cl accepts driver options before /link and passes all options
+        # after /link to lld-link. /clang:-Xlinker forwards one more argument.
+        direct_args = []
+        after_link = False
+        after_xlinker = False
+        for arg in link_args:
+            if after_link:
+                direct_args.append(arg)
+            elif arg in ("/link", "-link"):
+                after_link = True
+            else:
+                if arg.startswith("/clang:"):
+                    arg = arg[len("/clang:"):]
+                if after_xlinker:
+                    direct_args.append(arg)
+                    after_xlinker = False
+                elif arg == "-Xlinker":
+                    after_xlinker = True
+                elif arg.startswith("-Wl,"):
+                    direct_args.extend(arg[len("-Wl,"):].split(","))
+        link_args = direct_args
+    elif linker_config.rust_linker:
         # Make sure we include RPATHs for Rust ABI dylibs even when no cc_toolchain.
         if linker_config.variables == None and linker_config.rpaths:
             for rpath in linker_config.rpaths.to_list():
@@ -816,17 +862,7 @@ def collect_inputs(
     """
     linker_script = getattr(file, "linker_script", None)
 
-    # TODO: As of writing this comment Bazel used Java CcToolchainInfo.
-    # However there is ongoing work to rewrite provider in Starlark.
-    # rules_rust is not coupled with Bazel release. Remove conditional and change to
-    # _linker_files once Starlark CcToolchainInfo is visible to Bazel.
-    # https://github.com/bazelbuild/rules_rust/issues/2425
-    if not cc_toolchain:
-        linker_depset = depset()
-    elif hasattr(cc_toolchain, "_linker_files"):
-        linker_depset = cc_toolchain._linker_files
-    else:
-        linker_depset = cc_toolchain.linker_files()
+    linker_depset = _get_cc_linker_files(cc_toolchain)
     compilation_mode = ctx.var["COMPILATION_MODE"]
 
     use_pic = should_use_pic(
@@ -1505,6 +1541,7 @@ def construct_arguments(
                 feature_configuration,
                 rpaths,
                 add_flags_for_binary = add_flags_for_binary,
+                for_rustc = True,
             )
 
             ld_is_direct_driver = linker_config.is_direct_driver
