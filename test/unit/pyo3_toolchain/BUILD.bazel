@@ -1,0 +1,4 @@
+load(":pyo3_toolchain_test.bzl", "pyo3_toolchain_test_suite")
+
+############################ UNIT TESTS #############################
+pyo3_toolchain_test_suite(name = "pyo3_toolchain_test_suite")
