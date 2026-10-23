@@ -15,6 +15,7 @@ bazel_dep(name = "bazel_skylib", version = "1.8.2")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "protobuf", version = "28.3", repo_name = "com_google_protobuf")
 bazel_dep(name = "rules_cc", version = "0.2.4")
+bazel_dep(name = "with_cfg.bzl", version = "0.14.6")
 
 # Backport rules_cc commit 4591082affa5a63f4f06942e14ea69984bb68ed0
 # until a release contains the PIC backend fix needed by the LTO tests.
@@ -100,3 +101,20 @@ use_repo(
 
 bazel_dep(name = "rules_testing", version = "0.7.0", dev_dependency = True)
 bazel_dep(name = "bazel_ci_rules", version = "1.0.0", dev_dependency = True)
+
+source_normalizer_deps = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+source_normalizer_deps.from_cargo(
+    name = "source_normalizer_deps",
+    cargo_lock = "//util/source_normalizer:Cargo.lock",
+    cargo_toml = "//util/source_normalizer:Cargo.toml",
+    platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+    ],
+    use_legacy_rules_rust_platforms = True,
+)
+use_repo(source_normalizer_deps, "source_normalizer_deps")

@@ -16,7 +16,7 @@ def _codegen_units_test_impl(ctx, enabled = True):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     if enabled:

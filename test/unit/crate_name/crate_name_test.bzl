@@ -9,13 +9,13 @@ def _default_crate_name_library_test_impl(ctx):
     tut = analysistest.target_under_test(env)
 
     # Note: Hyphens in crate name converted to underscores.
-    assert_argv_contains(env, tut.actions[0], "--crate-name=default_crate_name_library")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=default_crate_name_library")
     return analysistest.end(env)
 
 def _custom_crate_name_library_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    assert_argv_contains(env, tut.actions[0], "--crate-name=custom_name")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=custom_name")
     return analysistest.end(env)
 
 def _default_crate_name_binary_test_impl(ctx):
@@ -23,13 +23,13 @@ def _default_crate_name_binary_test_impl(ctx):
     tut = analysistest.target_under_test(env)
 
     # Note: Hyphens in crate name converted to underscores.
-    assert_argv_contains(env, tut.actions[0], "--crate-name=default_crate_name_binary")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=default_crate_name_binary")
     return analysistest.end(env)
 
 def _custom_crate_name_binary_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    assert_argv_contains(env, tut.actions[0], "--crate-name=custom_name")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=custom_name")
     return analysistest.end(env)
 
 def _default_crate_name_test_test_impl(ctx):
@@ -37,13 +37,13 @@ def _default_crate_name_test_test_impl(ctx):
     tut = analysistest.target_under_test(env)
 
     # Note: Hyphens in crate name converted to underscores.
-    assert_argv_contains(env, tut.actions[0], "--crate-name=default_crate_name_test")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=default_crate_name_test")
     return analysistest.end(env)
 
 def _custom_crate_name_test_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    assert_argv_contains(env, tut.actions[0], "--crate-name=custom_name")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=custom_name")
     return analysistest.end(env)
 
 def _slib_library_name_test_impl(ctx):
@@ -58,8 +58,8 @@ def _slib_library_name_test_impl(ctx):
     """
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    assert_argv_contains_prefix_then_digit(env, tut.actions[0], "--codegen=metadata=-")
-    assert_argv_contains_prefix_then_digit(env, tut.actions[0], "--codegen=extra-filename=-")
+    assert_argv_contains_prefix_then_digit(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--codegen=metadata=-")
+    assert_argv_contains_prefix_then_digit(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--codegen=extra-filename=-")
     return analysistest.end(env)
 
 def _no_extra_filename_test_impl(ctx):
@@ -70,8 +70,8 @@ def _no_extra_filename_test_impl(ctx):
     """
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    assert_argv_contains_prefix_not(env, tut.actions[0], "--codegen=metadata=")
-    assert_argv_contains_prefix_not(env, tut.actions[0], "--codegen=extra-filename=")
+    assert_argv_contains_prefix_not(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--codegen=metadata=")
+    assert_argv_contains_prefix_not(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--codegen=extra-filename=")
     return analysistest.end(env)
 
 def _default_crate_name_rust_test_suite_test_impl(ctx):
@@ -79,7 +79,7 @@ def _default_crate_name_rust_test_suite_test_impl(ctx):
     tut = analysistest.target_under_test(env)
 
     # Note: Hyphens and Dots in crate name converted to underscores.
-    assert_argv_contains(env, tut.actions[0], "--crate-name=default_crate_name_rust_test_suite_foo_bar_main_test")
+    assert_argv_contains(env, [action for action in tut.actions if action.mnemonic == "Rustc"][0], "--crate-name=default_crate_name_rust_test_suite_foo_bar_main_test")
     return analysistest.end(env)
 
 default_crate_name_library_test = analysistest.make(

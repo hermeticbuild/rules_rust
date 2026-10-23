@@ -1,0 +1,29 @@
+load("//rust:defs.bzl", "rust_library", "rust_test")
+load(":source_normalization_test.bzl", "source_normalization_test")
+
+rust_library(
+    name = "library",
+    srcs = [
+        "lib.rs",
+        "module.rs",
+    ],
+    compile_data = ["message.txt"],
+    edition = "2024",
+)
+
+source_normalization_test(
+    name = "actions_test",
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    target_under_test = ":library",
+)
+
+rust_test(
+    name = "source_normalization_test",
+    size = "small",
+    srcs = ["test.rs"],
+    edition = "2024",
+    deps = [":library"],
+)

@@ -7,7 +7,7 @@ load("//test/unit:common.bzl", "assert_argv_contains", "assert_argv_contains_not
 EXTRA_FLAG = "--codegen=linker-plugin-lto"
 
 def target_action_contains_not_flag(env, target):
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     asserts.equals(env, "Rustc", action.mnemonic)
 
     assert_argv_contains_not(
@@ -17,7 +17,7 @@ def target_action_contains_not_flag(env, target):
     )
 
 def target_action_contains_flag(env, target):
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     asserts.equals(env, "Rustc", action.mnemonic)
 
     assert_argv_contains(
