@@ -2468,6 +2468,8 @@ def rustc_compile(
             output_type = "executable" if crate_info.type == "bin" else "dynamic_library",
             additional_outputs = additional_linker_outputs,
             variables_extension = variables_extension,
+            # Lets thin_lto_linkstatic_tests_use_shared_nonlto_backends apply, as it does for cc_test.
+            test_only_target = cc_helper.is_test_target(ctx) or crate_info.is_test,
         )
 
         if rust_toolchain.target_os == "linux" and cc_helper.should_create_per_object_debug_info(feature_configuration, ctx.fragments.cpp):

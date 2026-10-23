@@ -6,7 +6,7 @@ load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_library_group", "rust_proc_macro")
+load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_library_group", "rust_proc_macro", "rust_test")
 load(
     "//test/unit:common.bzl",
     "assert_action_mnemonic",
@@ -535,6 +535,14 @@ def lto_test_suite(name):
         tags = ["manual"],
     )
 
+    rust_test(
+        name = "distributed_rust_test",
+        srcs = [":main.rs"],
+        deps = [":distributed_lib"],
+        edition = "2021",
+        tags = ["manual"],
+    )
+
     cc_binary(
         name = "distributed_cc_static_bin",
         srcs = [":main.cc"],
@@ -604,6 +612,11 @@ def lto_test_suite(name):
         target_under_test = ":distributed_cc_static_test",
     )
 
+    _distributed_thin_lto_shared_backends_test(
+        name = "distributed_thin_lto_rust_test_shared_backends_test",
+        target_under_test = ":distributed_rust_test",
+    )
+
     _distributed_thin_lto_all_shared_backends_test(
         name = "distributed_thin_lto_all_shared_backends_test",
         target_under_test = ":distributed_cc_static_bin",
@@ -658,6 +671,7 @@ def lto_test_suite(name):
             ":distributed_thin_lto_global_allocator_test",
             ":distributed_thin_lto_cc_binary_test",
             ":distributed_thin_lto_shared_backends_test",
+            ":distributed_thin_lto_rust_test_shared_backends_test",
             ":distributed_thin_lto_all_shared_backends_test",
             ":distributed_thin_lto_library_shared_backend_test",
             ":distributed_thin_lto_requires_allocator_setting_test",
