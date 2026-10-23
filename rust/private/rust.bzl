@@ -1547,20 +1547,16 @@ rust_binary = rule(
 """),
 )
 
-def _common_attrs_for_binary_without_process_wrapper(attrs):
-    new_attr = dict(attrs)
-
-    # fix stamp = 0
-    new_attr["stamp"] = attr.int(
+_WITHOUT_PROCESS_WRAPPER_ATTRS = {
+    "stamp": attr.int(
         doc = dedent("""\
             Fix `stamp = 0` as stamping is not supported when building without process_wrapper:
             https://github.com/bazelbuild/rules_rust/blob/8df4517d370b0c543a01ba38b63e1d5a4104b035/rust/private/rustc.bzl#L955
         """),
         default = 0,
         values = [0],
-    )
-
-    return new_attr
+    ),
+}
 
 _RustBuiltWithoutProcessWrapperInfo = provider(
     doc = "A provider identifying the target having been built using a `*_without_process_wrapper` rule variant.",
@@ -1584,12 +1580,12 @@ rust_binary_without_process_wrapper = rule(
     implementation = _rust_binary_without_process_wrapper_impl,
     doc = "A variant of `rust_binary` that uses a minimal process wrapper for `Rustc` actions.",
     provides = COMMON_PROVIDERS + [_RustBuiltWithoutProcessWrapperInfo],
-    attrs = _common_attrs_for_binary_without_process_wrapper(_COMMON_ATTRS | _RUST_BINARY_ATTRS | {
+    attrs = _COMMON_ATTRS | _RUST_BINARY_ATTRS | {
         "_allowlist_function_transition": attr.label(
             default = Label("//tools/allowlists/function_transition_allowlist"),
         ),
         "skip_deps_verification": attr.bool(default = True),
-    }),
+    } | _WITHOUT_PROCESS_WRAPPER_ATTRS,
     executable = True,
     fragments = ["cpp"],
     cfg = _bootstrap_process_wrapper_transition,
@@ -1607,7 +1603,7 @@ rust_library_without_process_wrapper = rule(
     implementation = _rust_library_without_process_wrapper_impl,
     doc = "A variant of `rust_library` that uses a minimal process wrapper for `Rustc` actions.",
     provides = COMMON_PROVIDERS + [_RustBuiltWithoutProcessWrapperInfo],
-    attrs = dict(_common_attrs_for_binary_without_process_wrapper(_COMMON_ATTRS).items()),
+    attrs = _COMMON_ATTRS | _WITHOUT_PROCESS_WRAPPER_ATTRS,
     fragments = ["cpp"],
     toolchains = [
         str(Label("//rust:toolchain_type")),
@@ -1622,7 +1618,7 @@ def _rust_static_library_without_process_wrapper_impl(ctx):
 rust_static_library_without_process_wrapper = rule(
     implementation = _rust_static_library_without_process_wrapper_impl,
     doc = "A variant of `rust_static_library` that uses a minimal process wrapper for `Rustc` actions.",
-    attrs = dict(_common_attrs_for_binary_without_process_wrapper(_COMMON_ATTRS).items()),
+    attrs = _COMMON_ATTRS | _WITHOUT_PROCESS_WRAPPER_ATTRS,
     fragments = ["cpp"],
     toolchains = [
         str(Label("//rust:toolchain_type")),
