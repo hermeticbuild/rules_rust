@@ -76,7 +76,7 @@ def _assert_bin_dir_structure(env, ctx, bin_dir, toolchain):
 def _rlib_has_no_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     assert_argv_contains(env, action, "--crate-type=rlib")
     assert_argv_contains_not(env, action, "-lstatic=native_dep")
     assert_argv_contains_not(env, action, "-ldylib=native_dep")
@@ -86,7 +86,7 @@ def _rlib_has_no_native_libs_test_impl(ctx):
 def _cdylib_has_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     toolchain = _get_toolchain(ctx)
     compilation_mode = ctx.var["COMPILATION_MODE"]
     pic_suffix = _get_pic_suffix(ctx, compilation_mode)
@@ -107,7 +107,7 @@ def _cdylib_has_native_libs_test_impl(ctx):
 def _staticlib_has_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     toolchain = _get_toolchain(ctx)
     compilation_mode = ctx.var["COMPILATION_MODE"]
     pic_suffix = _get_pic_suffix(ctx, compilation_mode)
@@ -128,7 +128,7 @@ def _staticlib_has_native_libs_test_impl(ctx):
 def _proc_macro_has_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     toolchain = _get_toolchain(ctx)
     compilation_mode = ctx.var["COMPILATION_MODE"]
     pic_suffix = _get_pic_suffix(ctx, compilation_mode)
@@ -149,7 +149,7 @@ def _proc_macro_has_native_libs_test_impl(ctx):
 def _bin_has_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     toolchain = _get_toolchain(ctx)
     compilation_mode = ctx.var["COMPILATION_MODE"]
     pic_suffix = _get_pic_suffix(ctx, compilation_mode)
@@ -186,7 +186,7 @@ def _extract_linker_args(argv):
 def _bin_has_native_dep_and_alwayslink_test_impl(ctx, use_cc_linker):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
 
     toolchain = _get_toolchain(ctx)
     link_args = _extract_linker_args(action.argv)
@@ -270,7 +270,7 @@ def _cdylib_has_native_dep_and_alwayslink_test_impl(ctx, use_cc_linker):
 
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
 
     linker_args = _extract_linker_args(action.argv)
     bin_dir = get_bin_dir_from_action(action)
@@ -550,7 +550,7 @@ def _native_dep_test():
 def _linkopts_propagate_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
 
     # Ensure linkopts from direct (-Llinkoptdep1) and transitive
     # (-Llinkoptdep2) dependencies are propagated.
@@ -596,7 +596,7 @@ def _linkopts_test():
 def _check_additional_deps_test_impl(ctx, expect_additional_deps):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[0]
+    action = [action for action in tut.actions if action.mnemonic == "Rustc"][0]
     additional_inputs = [inp.basename for inp in action.inputs.to_list()]
     asserts.equals(env, "dynamic.lds" in additional_inputs, expect_additional_deps)
     return analysistest.end(env)

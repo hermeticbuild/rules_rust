@@ -252,6 +252,7 @@ def _rust_library_common(ctx, crate_type):
         attr = ctx.attr,
         toolchain = toolchain,
         output_hash = output_hash,
+        source_normalizer = toolchain._source_normalizer if crate_type == "rlib" else None,
         crate_info_dict = dict(
             name = crate_name,
             type = crate_type,
@@ -1122,6 +1123,12 @@ rust_library = rule(
     ],
     doc = dedent("""\
         Builds a Rust library crate.
+
+        Production sources are normalized before compilation so ordinary comments,
+        formatting and test-only items do not invalidate the compiler actions.
+        Tests, Clippy, rustfmt and rustdoc retain the original sources. Normalization
+        changes source locations and can be observed by procedural macros; see
+        [source normalization](https://github.com/hermeticbuild/rules_rust/blob/main/util/source_normalizer/README.md) for details.
 
         Example:
 

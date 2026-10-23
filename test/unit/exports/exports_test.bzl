@@ -7,7 +7,7 @@ def _exports_test_impl(ctx, dependencies, externs):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     asserts.equals(env, action.mnemonic, "Rustc")
 
     # Transitive symbols that get re-exported are expected to be located by a `-Ldependency` flag.

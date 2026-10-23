@@ -97,3 +97,15 @@ config_setting(
     },
     visibility = ["//visibility:public"],
 )
+
+# The normalizer's private bootstrap transition clears this dependency while
+# retaining the full process wrapper and Cargo build-script support.
+label_setting(
+    name = "source_normalizer",
+    build_setting_default = "//util/source_normalizer:bootstrap",
+)
+
+filegroup(
+    name = "no_source_normalizer",
+    visibility = ["//util/source_normalizer:__pkg__"],
+)

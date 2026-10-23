@@ -16,7 +16,7 @@ def _remap_path_prefix_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     assert_list_contains_adjacent_elements(env, action.argv, [
@@ -34,7 +34,7 @@ def _subst_flags_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     assert_list_contains_adjacent_elements(env, action.argv, ["--subst", "pwd=${pwd}"])
@@ -90,7 +90,7 @@ def _coverage_remap_path_prefix_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     # If the host toolchain does not support coverage (no `llvm_cov` or
@@ -116,7 +116,7 @@ def _no_coverage_remap_path_prefix_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     assert_argv_contains_not(env, action, "--codegen=instrument-coverage")

@@ -70,7 +70,7 @@ def _lto_test_impl(ctx, lto_setting, embed_bitcode, linker_plugin):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     # Check if LTO is enabled.

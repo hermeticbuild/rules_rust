@@ -19,7 +19,7 @@ _RUSTFMT_TOOLCHAIN_ENV = {
 def _rust_toolchain_make_variable_expansion_test_common_impl(ctx, mnemonic):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == mnemonic][0]
 
     assert_action_mnemonic(
         env = env,

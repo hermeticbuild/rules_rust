@@ -1059,6 +1059,10 @@ def dlltool_path_from_linker_path(linker_path):
     suffix = linker_path[-4:].lower()
     return "{}dlltool{}".format(linker_path[:sep + 1], suffix if suffix == ".exe" else "")
 
+def _source_manifest_dir(ctx):
+    components = "${{pwd}}/{}/{}".format(ctx.label.workspace_root, ctx.label.package).split("/")
+    return "/".join([c for c in components if c])
+
 def construct_arguments(
         *,
         ctx,
@@ -1094,7 +1098,9 @@ def construct_arguments(
         allowed_unstable_rust_features = None,
         link_std_dylib = None,
         runtime_libs = None,
-        linker_plugin_lto = False):
+        linker_plugin_lto = False,
+        original_crate_root = None,
+        normalized_sources = None):
     """Builds an Args object containing common rustc flags
 
     Args:
@@ -1105,6 +1111,8 @@ def construct_arguments(
         cc_toolchain (CcToolchain): The CcToolchain for the current target.
         feature_configuration (FeatureConfiguration): Class used to construct command lines from CROSSTOOL features.
         crate_info (CrateInfo): The CrateInfo provider of the target crate
+        original_crate_root (File, optional): Source path for per-crate flag matching.
+        normalized_sources (File, optional): Directory containing the normalized source tree.
         dep_info (DepInfo): The DepInfo provider of the target crate
         linkstamp_outs (list): Linkstamp outputs of native dependencies
         ambiguous_libs (dict): Ambiguous libs, see `_disambiguate_libs`
@@ -1228,11 +1236,18 @@ def construct_arguments(
         process_wrapper_flags.add("--volatile-status-file", ctx.version_file)
         process_wrapper_flags.add("--stable-status-file", ctx.info_file)
 
-    if crate_info.root.is_source:
+    if normalized_sources:
+        process_wrapper_flags.add_all(
+            [normalized_sources],
+            before_each = "--subst",
+            format_each = "cargo_manifest_dir=%s/" + paths.join(ctx.label.workspace_root, ctx.label.package),
+            expand_directories = False,
+        )
+        env["CARGO_MANIFEST_DIR"] = "${pwd}/${cargo_manifest_dir}"
+    elif crate_info.root.is_source:
         # Both ctx.label.workspace_root and ctx.label.package are relative paths
         # and either can be empty strings. Avoid trailing/double slashes in the path.
-        components = "${{pwd}}/{}/{}".format(ctx.label.workspace_root, ctx.label.package).split("/")
-        env["CARGO_MANIFEST_DIR"] = "/".join([c for c in components if c])
+        env["CARGO_MANIFEST_DIR"] = _source_manifest_dir(ctx)
     else:
         # transform_sources stages source inputs and compile_data under the binary
         # output tree whenever the crate has a generated input. Keep the manifest
@@ -1606,7 +1621,8 @@ def construct_arguments(
     is_coverage_instrumented = ctx.coverage_instrumented()
     if not is_coverage_instrumented and crate_info.is_test and hasattr(ctx.attr, "crate") and ctx.attr.crate:
         is_coverage_instrumented = ctx.coverage_instrumented(ctx.attr.crate)
-    if toolchain.coverage_supported and ctx.configuration.coverage_enabled and is_coverage_instrumented:
+    is_coverage_instrumented = toolchain.coverage_supported and ctx.configuration.coverage_enabled and is_coverage_instrumented
+    if is_coverage_instrumented:
         # https://doc.rust-lang.org/rustc/instrument-coverage.html
         rustc_flags.add("--codegen=instrument-coverage")
 
@@ -1631,6 +1647,15 @@ def construct_arguments(
 
     if link_std_dylib:
         rustc_flags.add("--codegen=prefer-dynamic")
+
+    if normalized_sources and remap_path_prefix != None:
+        # Keep file!() and diagnostic paths independent of the staging tree.
+        prefix = "" if original_crate_root.is_source or is_coverage_instrumented else "bazel-bin/"
+        rustc_flags.add_all(
+            [normalized_sources],
+            format_each = "--remap-path-prefix=%s/=" + prefix,
+            expand_directories = False,
+        )
 
     # Make bin crate data deps available to tests.
     for data in getattr(attr, "data", []):
@@ -1689,7 +1714,7 @@ def construct_arguments(
     # stripped features are silently dropped — matching the historical
     # behavior where `__all__` (or no config) means "no restriction".
     extra_rustc_flags = _extract_allowed_unstable_features_from_flags(
-        collect_extra_rustc_flags(ctx, toolchain, crate_info.root, crate_info.type),
+        collect_extra_rustc_flags(ctx, toolchain, original_crate_root or crate_info.root, crate_info.type),
         all_allowed_unstable_features,
     )
     if getattr(ctx.attr, "unstable_rust_features_config", None) and not "__all__" in all_allowed_unstable_features:
@@ -1865,12 +1890,13 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
 
     return flags
 
-def setup_zself_profile(ctx, crate_info):
+def setup_zself_profile(ctx, crate_info, original_crate_root = None):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
 
     Args:
         ctx (ctx): The current rule's context object.
         crate_info (CrateInfo): The CrateInfo provider of the target crate.
+        original_crate_root (File, optional): Source path for prefix matching.
 
     Returns:
         tuple: A tuple containing:
@@ -1888,7 +1914,7 @@ def setup_zself_profile(ctx, crate_info):
     # Check if the current crate matches any of the specified prefix filters.
     # Matching works by comparing against the target's label or its execution path.
     for pattern, event_types in events_info:
-        if matches_prefix_filter(ctx.label, crate_info.root.path, pattern):
+        if matches_prefix_filter(ctx.label, (original_crate_root or crate_info.root).path, pattern):
             is_self_profile_enabled = True
             event_types_to_use = event_types
             break
@@ -1904,6 +1930,34 @@ def setup_zself_profile(ctx, crate_info):
 
     return profiling_dir, profiling_flags
 
+def _source_path(src):
+    return "external/" + src.short_path[3:] if src.short_path.startswith("../") else src.short_path
+
+def _copy_input(src):
+    return ["copy", src.path, _source_path(src)]
+
+def _normalize_input(src):
+    return ["normalize", src.path, _source_path(src)]
+
+def _normalize_sources(ctx, normalizer, srcs, compile_data):
+    output = ctx.actions.declare_directory(ctx.label.name + "_normalized")
+    args = ctx.actions.args()
+    args.add_all([output], expand_directories = False)
+    args.add_all(compile_data, map_each = _copy_input, expand_directories = False)
+    args.add_all(srcs, map_each = _normalize_input, expand_directories = False)
+    args.use_param_file("@%s", use_always = True)
+    args.set_param_file_format("multiline")
+    ctx.actions.run(
+        executable = normalizer[DefaultInfo].files_to_run,
+        arguments = [args],
+        inputs = depset(transitive = [srcs, compile_data]),
+        outputs = [output],
+        mnemonic = "RustNormalizeSources",
+        progress_message = "Normalizing production Rust sources for %{label}",
+        execution_requirements = {"supports-path-mapping": ""},
+    )
+    return output
+
 def rustc_compile(
         *,
         ctx,
@@ -1917,6 +1971,7 @@ def rustc_compile(
         skip_expanding_rustc_env = False,
         include_coverage = True,
         allowed_unstable_rust_features = None,
+        source_normalizer = None,
         extra_named_deps = None,
         file = None,
         files = None,
@@ -1939,6 +1994,7 @@ def rustc_compile(
             to the commandline as opposed to -L. Aspects and extensions that need this should maintain an
             explicit depset of named dependencies and pass it via `extra_named_deps` instead.
         crate_info_dict: A mutable dict used to create CrateInfo provider
+        source_normalizer: Optional executable target for production source normalization.
         skip_expanding_rustc_env (bool, optional): Whether to expand CrateInfo.rustc_env
         include_coverage (bool, optional): Whether to generate coverage information or not.
         allowed_unstable_rust_features (list, optional): A list of unstable Rust language features
@@ -1962,12 +2018,27 @@ def rustc_compile(
     proc_macro_deps = crate_info_dict.pop("proc_macro_deps")
     srcs = crate_info_dict.pop("srcs")
 
+    compile_crate_info_dict = crate_info_dict
+    normalized_sources = None
+    if source_normalizer and source_normalizer[DefaultInfo].files_to_run.executable:
+        normalized_sources = _normalize_sources(
+            ctx,
+            source_normalizer,
+            depset(srcs + [crate_info_dict["root"]]),
+            crate_info_dict["compile_data"],
+        )
+        compile_crate_info_dict = dict(
+            crate_info_dict,
+            root = normalized_sources,
+            root_path = paths.join(_source_path(crate_info_dict["root"]), crate_info_dict["root_path"]).rstrip("/"),
+        )
+
     crate_info = rust_common.create_crate_info(
         deps = depset(deps),
         proc_macro_deps = depset(proc_macro_deps),
-        srcs = depset(srcs),
+        srcs = depset([normalized_sources] if normalized_sources else srcs),
         extra_named_deps = extra_named_deps or depset([]),
-        **crate_info_dict
+        **compile_crate_info_dict
     )
 
     build_metadata = crate_info.metadata
@@ -2055,7 +2126,7 @@ def rustc_compile(
         rust_flags = rust_flags + attr.lint_config[LintsInfo].rustc_lint_flags
         lint_files = lint_files + attr.lint_config[LintsInfo].rustc_lint_files
 
-    profiling_dir, profiling_flags = setup_zself_profile(ctx, crate_info)
+    profiling_dir, profiling_flags = setup_zself_profile(ctx, crate_info, original_crate_root = crate_info_dict["root"])
     rust_flags = rust_flags + profiling_flags
 
     compile_inputs, out_dir, build_env_files, build_flags_files, linkstamp_outs, ambiguous_libs = collect_inputs(
@@ -2145,7 +2216,7 @@ def rustc_compile(
     collected_extra_flags = collect_extra_rustc_flags(
         ctx,
         rust_toolchain,
-        crate_info.root,
+        crate_info_dict["root"],
         crate_info.type,
     )
 
@@ -2170,6 +2241,8 @@ def rustc_compile(
         emit = emit,
         feature_configuration = feature_configuration,
         crate_info = crate_info,
+        original_crate_root = crate_info_dict["root"],
+        normalized_sources = normalized_sources,
         dep_info = dep_info,
         linkstamp_outs = linkstamp_outs,
         ambiguous_libs = ambiguous_libs,
@@ -2206,6 +2279,8 @@ def rustc_compile(
             emit = metadata_emit,
             feature_configuration = feature_configuration,
             crate_info = crate_info,
+            original_crate_root = crate_info_dict["root"],
+            normalized_sources = normalized_sources,
             dep_info = dep_info,
             linkstamp_outs = linkstamp_outs,
             ambiguous_libs = ambiguous_libs,
@@ -2610,6 +2685,10 @@ def rustc_compile(
         # ctx.configuration.default_shell_env, which must not leak through
         # CrateInfo -- it would otherwise clobber cc_toolchain link_env in
         # downstream rust_test(crate = ...) (see bazelbuild/rules_rust#3989).
+        if normalized_sources and crate_info_dict["root"].is_source and env_from_args.get("CARGO_MANIFEST_DIR") == "${pwd}/${cargo_manifest_dir}":
+            # This generated-path substitution belongs only to compilation.
+            # Preserve any explicitly overridden manifest directory.
+            env_from_args = dict(env_from_args, CARGO_MANIFEST_DIR = _source_manifest_dir(ctx))
         crate_info_dict.update({
             "rustc_env": env_from_args,
         })
@@ -2691,6 +2770,7 @@ def rustc_compile_action(
         skip_expanding_rustc_env = False,
         include_coverage = True,
         allowed_unstable_rust_features = None,
+        source_normalizer = None,
         extra_named_deps = None):
     result = rustc_compile(
         ctx = ctx,
@@ -2705,6 +2785,7 @@ def rustc_compile_action(
         include_coverage = include_coverage,
         allowed_unstable_rust_features = allowed_unstable_rust_features,
         extra_named_deps = extra_named_deps,
+        source_normalizer = source_normalizer,
     )
     providers = result.providers
 

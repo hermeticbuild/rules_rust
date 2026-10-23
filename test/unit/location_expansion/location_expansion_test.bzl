@@ -15,13 +15,13 @@ def _find_action(tut, mnemonic):
 def _location_expansion_rustc_flags_test(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
-    action = tut.actions[1]
+    action = _find_action(tut, "Rustc")
     assert_action_mnemonic(env, action, "Rustc")
 
     # Because target `rustc_flags` use location macros, the action does
     # not advertise `supports-path-mapping`, so file paths remain at their
     # configuration-specific `ctx.bin_dir` locations.
-    assert_argv_contains(env, action, ctx.bin_dir.path + "/test/unit/location_expansion/mylibrary.rs")
+    assert_argv_contains(env, action, ctx.bin_dir.path + "/test/unit/location_expansion/mylibrary_normalized/test/unit/location_expansion/mylibrary.rs")
 
     # All four forms must be prefixed with @${pwd}/ so that process_wrapper
     # can resolve them to absolute paths at run time. Each form references a

@@ -30,7 +30,7 @@ def _stamp_build_flag_test_impl(ctx, flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     is_test = target[rust_common.crate_info].is_test
@@ -132,7 +132,7 @@ def _attribute_stamp_test_impl(ctx, attribute_value, build_flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     if attribute_value == 1:
@@ -281,7 +281,7 @@ def _process_wrapper_with_stamp_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     _assert_not_stamped(env, action)

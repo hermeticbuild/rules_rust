@@ -694,6 +694,7 @@ def _rust_toolchain_impl(ctx):
         _incompatible_do_not_include_transitive_data_in_compile_inputs = ctx.attr._incompatible_do_not_include_transitive_data_in_compile_inputs[IncompatibleFlagInfo].enabled,
         _no_std = no_std,
         _bootstrapping = ctx.attr.bootstrapping,
+        _source_normalizer = ctx.attr._source_normalizer,
         _codegen_units = ctx.attr._codegen_units[BuildSettingInfo].value,
         _experimental_use_allocator_libraries_with_mangled_symbols = ctx.attr.experimental_use_allocator_libraries_with_mangled_symbols,
         _experimental_use_allocator_libraries_with_mangled_symbols_setting = ctx.attr._experimental_use_allocator_libraries_with_mangled_symbols_setting[BuildSettingInfo].value,
@@ -703,11 +704,18 @@ def _rust_toolchain_impl(ctx):
         make_variable_info,
     ]
 
+def _source_normalizer(bootstrapping):
+    return None if bootstrapping else Label("//rust/private:source_normalizer")
+
 rust_toolchain = rule(
     implementation = _rust_toolchain_impl,
     provides = [platform_common.ToolchainInfo],
     fragments = ["cpp"],
     attrs = {
+        "_source_normalizer": attr.label(
+            default = _source_normalizer,
+            cfg = "exec",
+        ),
         "allocator_library": attr.label(
             doc = "Target that provides allocator functions when `rust_library` targets are embedded in a `cc_binary`.",
             default = Label("//rust/settings:default_allocator_library"),

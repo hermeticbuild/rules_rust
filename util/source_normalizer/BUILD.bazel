@@ -1,0 +1,32 @@
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@source_normalizer_deps//:data.bzl", "DEP_DATA")
+load(":defs.bzl", "rust_source_normalizer")
+
+rust_library(
+    name = "lib",
+    srcs = ["lib.rs"],
+    crate_name = "rust_source_normalize",
+    edition = "2024",
+    deps = DEP_DATA["util/source_normalizer"]["deps"],
+)
+
+rust_binary(
+    name = "source_normalizer",
+    srcs = ["main.rs"],
+    edition = "2024",
+    deps = [":lib"] + DEP_DATA["util/source_normalizer"]["deps"],
+)
+
+rust_source_normalizer(
+    name = "bootstrap",
+    actual = ":source_normalizer",
+    visibility = ["//rust/private:__pkg__"],
+)
+
+rust_test(
+    name = "source_normalizer_test",
+    size = "small",
+    crate = ":lib",
+)
