@@ -1,0 +1,3 @@
+load(":msvc_linker_test.bzl", "msvc_linker_test_suite")
+
+msvc_linker_test_suite(name = "msvc_linker_test_suite")
