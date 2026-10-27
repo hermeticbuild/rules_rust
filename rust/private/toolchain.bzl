@@ -545,6 +545,7 @@ def _rust_toolchain_impl(ctx):
     target_arch = None
     target_os = None
     target_abi = None
+    default_panic_strategy = ctx.attr.default_panic_strategy
 
     if ctx.attr.target_triple:
         target_triple = triple(ctx.attr.target_triple)
@@ -568,6 +569,7 @@ def _rust_toolchain_impl(ctx):
             target_os = target_json_content["os"]
         if "env" in target_json_content:
             target_abi = target_json_content["env"]
+        default_panic_strategy = target_json_content.get("panic-strategy", default_panic_strategy)
     else:
         fail("Either `target_triple` or `target_json` must be provided. Please update {}".format(
             ctx.label,
@@ -595,7 +597,7 @@ def _rust_toolchain_impl(ctx):
                 ctx.label,
             ))
 
-    def make_ccinfo(label, actions, allocator_library, std, link_std_dylib):
+    def make_ccinfo(label, actions, allocator_library, std, link_std_dylib = False, panic_strategy = "unwind"):
         return make_libstd_and_allocator_ccinfo(
             cc_toolchain = cc_toolchain,
             feature_configuration = feature_configuration,
@@ -605,16 +607,24 @@ def _rust_toolchain_impl(ctx):
             rust_std = rust_std,
             allocator_library = allocator_library,
             std = std,
+            panic_strategy = panic_strategy,
         )
 
-    def make_local_ccinfo(allocator_library, std, link_std_dylib):
+    def make_local_ccinfo(allocator_library, std, link_std_dylib = False, panic_strategy = "unwind"):
         return make_ccinfo(
             ctx.label,
             ctx.actions,
             struct(cc_info = allocator_library),
             std,
             link_std_dylib,
+            panic_strategy,
         )
+
+    def make_local_ccinfos(allocator_library, std):
+        return {
+            panic_strategy: make_local_ccinfo(allocator_library, std, panic_strategy = panic_strategy)
+            for panic_strategy in ("unwind", "abort", "immediate-abort")
+        }
 
     # C++ toolchain inputs are attached to the Rust actions that use them.
     all_files_depsets = [sysroot.all_files]
@@ -640,11 +650,14 @@ def _rust_toolchain_impl(ctx):
         env = ctx.attr.env,
         exec_triple = exec_triple,
         iso_date = ctx.attr.iso_date,
-        libstd_and_allocator_ccinfo = make_local_ccinfo(ctx.attr.allocator_library[CcInfo], "std", False),
-        libstd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "std", False),
-        nostd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "no_std_with_alloc", False),
         libstd_dylib_and_allocator_ccinfo = make_local_ccinfo(ctx.attr.allocator_library[CcInfo], "std", True),
         libstd_dylib_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "std", True),
+        default_panic_strategy = default_panic_strategy,
+        libstd_and_allocator_ccinfo = make_local_ccinfo(ctx.attr.allocator_library[CcInfo], "std"),
+        libstd_and_allocator_ccinfos = make_local_ccinfos(ctx.attr.allocator_library[CcInfo], "std"),
+        libstd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "std"),
+        libstd_and_global_allocator_ccinfos = make_local_ccinfos(ctx.attr.global_allocator_library[CcInfo], "std"),
+        nostd_and_global_allocator_ccinfo = make_local_ccinfo(ctx.attr.global_allocator_library[CcInfo], "no_std_with_alloc"),
         make_libstd_and_allocator_ccinfo = make_ccinfo,
         linker = sysroot.linker,
         linker_preference = linker_preference,
@@ -759,6 +772,11 @@ rust_toolchain = rule(
                 "The edition to use for rust_* rules that don't specify an edition. " +
                 "If absent, every rule is required to specify its `edition` attribute."
             ),
+        ),
+        "default_panic_strategy": attr.string(
+            default = "unwind",
+            doc = "Default panic strategy reported by rustc for the target triple.",
+            values = ["unwind", "abort", "immediate-abort"],
         ),
         "dlltool": attr.label(
             doc = "The dlltool executable rustc uses to generate Windows GNU import libraries.",

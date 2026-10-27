@@ -46,7 +46,8 @@ def make_libstd_and_allocator_ccinfo(
         link_std_dylib,
         rust_std,
         allocator_library,
-        std = "std"):
+        std = "std",
+        panic_strategy = "unwind"):
     """Make the CcInfo (if possible) for libstd and allocator libraries.
 
     Args:
@@ -60,8 +61,9 @@ def make_libstd_and_allocator_ccinfo(
           This should be a struct with either:
           * a cc_info field of type CcInfo
           * an allocator_libraries_impl_info field, which should be None or of type AllocatorLibrariesImplInfo.
-        std: Standard library flavor. Currently only "std" and "no_std_with_alloc" are supported,
-             accompanied with the default panic behavior.
+        std: Standard library flavor. Currently "std" and "no_std_with_alloc" are supported.
+        panic_strategy: Panic runtime to include for std builds. One of "unwind", "abort", or
+            "immediate-abort".
 
 
     Returns:
@@ -133,41 +135,48 @@ def make_libstd_and_allocator_ccinfo(
             order = "topological",
         )
 
-        # The libraries panic_abort and panic_unwind are alternatives.
-        # The std by default requires panic_unwind.
-        # Exclude panic_abort if panic_unwind is present.
-        # TODO: Provide a setting to choose between panic_abort and panic_unwind.
+        if panic_strategy not in ("unwind", "abort", "immediate-abort"):
+            fail("Unsupported panic strategy '{}'".format(panic_strategy))
+        if link_std_dylib and panic_strategy != "unwind":
+            # The distributed std dylib is built for the target's unwind
+            # strategy. A differently-built dylib would need its own toolchain
+            # entry before these strategies can be supported.
+            return None
+
+        # rustc injects exactly one panic runtime according to the effective
+        # -Cpanic strategy. Match that selection when a C++ linker owns the
+        # final link. immediate-abort does not use a panic runtime.
         filtered_between_core_and_std_files = rust_stdlib_info.between_core_and_std_files
-        has_panic_unwind = [
-            f
-            for f in filtered_between_core_and_std_files
-            if "panic_unwind" in f.basename
-        ]
-        if has_panic_unwind:
+        if panic_strategy == "unwind":
             filtered_between_core_and_std_files = [
                 f
                 for f in filtered_between_core_and_std_files
-                if "abort" not in f.basename
+                if "panic_abort" not in f.basename
             ]
-            core_alloc_and_panic_inputs = depset(
-                [
-                    _ltl(f, actions, cc_toolchain, feature_configuration)
-                    for f in rust_stdlib_info.panic_files
-                    if "unwind" not in f.basename
-                ],
-                transitive = [core_inputs],
-                order = "topological",
-            )
+        elif panic_strategy == "abort":
+            filtered_between_core_and_std_files = [
+                f
+                for f in filtered_between_core_and_std_files
+                if "unwind" not in f.basename
+            ]
         else:
-            core_alloc_and_panic_inputs = depset(
-                [
-                    _ltl(f, actions, cc_toolchain, feature_configuration)
-                    for f in rust_stdlib_info.panic_files
-                    if "unwind" not in f.basename
-                ],
-                transitive = [core_inputs],
-                order = "topological",
-            )
+            filtered_between_core_and_std_files = [
+                f
+                for f in filtered_between_core_and_std_files
+                if "panic_abort" not in f.basename and "unwind" not in f.basename
+            ]
+
+        # no_std + alloc currently uses the aborting panic closure regardless
+        # of the std panic selection above.
+        core_alloc_and_panic_inputs = depset(
+            [
+                _ltl(f, actions, cc_toolchain, feature_configuration)
+                for f in rust_stdlib_info.panic_files
+                if "unwind" not in f.basename
+            ],
+            transitive = [core_inputs],
+            order = "topological",
+        )
         memchr_inputs = depset(
             [
                 _ltl(f, actions, cc_toolchain, feature_configuration)
@@ -266,23 +275,32 @@ def _rust_allocator_libraries_impl(ctx):
 
     toolchain = find_toolchain(ctx)
 
-    def make_cc_info(info, std, link_std_dylib):
+    def make_cc_info(info, std, link_std_dylib = False, panic_strategy = "unwind"):
         return toolchain.make_libstd_and_allocator_ccinfo(
             ctx.label,
             ctx.actions,
             struct(allocator_libraries_impl_info = info),
             std,
             link_std_dylib,
+            panic_strategy,
         )
+
+    def make_cc_infos(info, std):
+        return {
+            panic_strategy: make_cc_info(info, std, panic_strategy = panic_strategy)
+            for panic_strategy in ("unwind", "abort", "immediate-abort")
+        }
 
     providers = [AllocatorLibrariesInfo(
         allocator_library = allocator_library,
         global_allocator_library = global_allocator_library,
-        libstd_and_allocator_ccinfo = make_cc_info(allocator_library, "std", False),
-        libstd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std", False),
-        nostd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "no_std_with_alloc", False),
         libstd_dylib_and_allocator_ccinfo = make_cc_info(allocator_library, "std", True),
         libstd_dylib_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std", True),
+        libstd_and_allocator_ccinfo = make_cc_info(allocator_library, "std"),
+        libstd_and_allocator_ccinfos = make_cc_infos(allocator_library, "std"),
+        libstd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std"),
+        libstd_and_global_allocator_ccinfos = make_cc_infos(global_allocator_library, "std"),
+        nostd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "no_std_with_alloc"),
     )]
 
     return providers

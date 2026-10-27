@@ -48,25 +48,42 @@ def _libstd_ordering_test_impl(ctx):
 libstd_ordering_test = analysistest.make(_libstd_ordering_test_impl)
 
 def _libstd_panic_test_impl(ctx):
-    # The libraries panic_unwind and panic_abort are alternatives.
-    # Check that they don't occur together.
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
     stdlibs = _stdlibs(tut)
-    has_panic_unwind = [lib for lib in stdlibs if "panic_unwind" in lib.basename]
-    if has_panic_unwind:
-        has_panic_abort = [lib for lib in stdlibs if "panic_abort" in lib.basename]
-        asserts.false(env, has_panic_abort)
+    has_panic_unwind = bool([lib for lib in stdlibs if "panic_unwind" in lib.basename])
+    has_panic_abort = bool([lib for lib in stdlibs if "panic_abort" in lib.basename])
+    asserts.equals(env, ctx.attr.expected_panic_strategy == "unwind", has_panic_unwind)
+    asserts.equals(env, ctx.attr.expected_panic_strategy == "abort", has_panic_abort)
 
     return analysistest.end(env)
 
-libstd_panic_test = analysistest.make(_libstd_panic_test_impl)
+libstd_panic_test = analysistest.make(
+    _libstd_panic_test_impl,
+    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
+)
+
+libstd_wasm_default_panic_test = analysistest.make(
+    _libstd_panic_test_impl,
+    attrs = {"expected_panic_strategy": attr.string(mandatory = True)},
+    config_settings = {
+        "//command_line_option:platforms": [str(Label("//rust/platform:wasm32"))],
+    },
+)
 
 def _native_dep_test():
     rust_library(
         name = "some_rlib",
         srcs = ["some_rlib.rs"],
         edition = "2018",
+    )
+
+    rust_library(
+        name = "some_abort_rlib",
+        srcs = ["some_rlib.rs"],
+        edition = "2018",
+        rustc_flags = ["-Cpanic=abort"],
+        deps = [":some_rlib"],
     )
 
     libstd_ordering_test(
@@ -77,6 +94,19 @@ def _native_dep_test():
     libstd_panic_test(
         name = "libstd_panic_test",
         target_under_test = ":some_rlib",
+        expected_panic_strategy = "unwind",
+    )
+
+    libstd_panic_test(
+        name = "libstd_abort_panic_test",
+        target_under_test = ":some_abort_rlib",
+        expected_panic_strategy = "abort",
+    )
+
+    libstd_wasm_default_panic_test(
+        name = "libstd_wasm_default_panic_test",
+        target_under_test = ":some_rlib",
+        expected_panic_strategy = "abort",
     )
 
 def stdlib_suite(name):
@@ -91,5 +121,8 @@ def stdlib_suite(name):
         name = name,
         tests = [
             ":libstd_ordering_test",
+            ":libstd_panic_test",
+            ":libstd_abort_panic_test",
+            ":libstd_wasm_default_panic_test",
         ],
     )

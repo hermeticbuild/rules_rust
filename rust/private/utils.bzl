@@ -26,6 +26,7 @@ load(
     "CrateInfo",
     "DepInfo",
     "DepVariantInfo",
+    "RustCcInfo",
     "RustcOutputDiagnosticsInfo",
 )
 
@@ -572,7 +573,7 @@ def transform_deps(deps):
         crate_info = dep[CrateInfo] if CrateInfo in dep else None,
         dep_info = dep[DepInfo] if DepInfo in dep else None,
         build_info = dep[BuildInfo] if BuildInfo in dep else None,
-        cc_info = dep[CcInfo] if CcInfo in dep else None,
+        cc_info = dep[RustCcInfo].cc_info_without_std if RustCcInfo in dep else (dep[CcInfo] if CcInfo in dep else None),
         crate_group_info = dep[CrateGroupInfo] if CrateGroupInfo in dep else None,
     ) for dep in deps]
 
@@ -589,7 +590,7 @@ def transform_link_deps(link_deps):
         crate_info = None,
         dep_info = None,
         build_info = None,
-        cc_info = dep[CcInfo] if CcInfo in dep else None,
+        cc_info = dep[RustCcInfo].cc_info_without_std if RustCcInfo in dep else (dep[CcInfo] if CcInfo in dep else None),
         crate_group_info = None,
     ) for dep in link_deps]
 

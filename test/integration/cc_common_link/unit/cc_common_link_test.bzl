@@ -6,6 +6,8 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 load(
     "@rules_rust//rust:defs.bzl",
     "rust_binary",
+    "rust_library",
+    "rust_library_group",
     "rust_shared_library",
     "rust_test",
 )
@@ -185,6 +187,60 @@ custom_malloc_test = analysistest.make(
     },
 )
 
+def _panic_runtime_selection_test(ctx):
+    env = analysistest.begin(ctx)
+    registered_actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+    links = [action for action in registered_actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(links))
+
+    cmdline = " ".join(links[0].argv)
+    asserts.true(
+        env,
+        ctx.attr.expected_runtime in cmdline,
+        "expected {} in linker invocation".format(ctx.attr.expected_runtime),
+    )
+    asserts.false(
+        env,
+        ctx.attr.unexpected_runtime in cmdline,
+        "did not expect {} in linker invocation".format(ctx.attr.unexpected_runtime),
+    )
+    return analysistest.end(env)
+
+panic_runtime_selection_test = analysistest.make(
+    _panic_runtime_selection_test,
+    attrs = {
+        "expected_runtime": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(mandatory = True),
+    },
+)
+
+panic_setting_selection_test = analysistest.make(
+    _panic_runtime_selection_test,
+    attrs = {
+        "expected_runtime": attr.string(mandatory = True),
+        "unexpected_runtime": attr.string(mandatory = True),
+    },
+    config_settings = {
+        str(Label("@rules_rust//rust/settings:extra_rustc_flags")): ["-Cpanic=abort"],
+    },
+)
+
+def _panic_make_variables_impl(_ctx):
+    return [platform_common.TemplateVariableInfo({"PANIC_STRATEGY": "abort"})]
+
+panic_make_variables = rule(implementation = _panic_make_variables_impl)
+
+def _unsupported_panic_test(ctx):
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, ctx.attr.message)
+    return analysistest.end(env)
+
+unsupported_panic_test = analysistest.make(
+    _unsupported_panic_test,
+    expect_failure = True,
+    attrs = {"message": attr.string(mandatory = True)},
+)
+
 def _cc_common_link_test_targets():
     """Generate targets and tests."""
 
@@ -206,6 +262,29 @@ def _cc_common_link_test_targets():
     use_cc_common_link_on_target(
         name = "bin_with_cc_common_link",
         target = ":bin",
+    )
+
+    rust_library(
+        name = "panic_default_dep",
+        srcs = ["lib.rs"],
+        edition = "2021",
+    )
+    rust_library_group(
+        name = "panic_dep_group",
+        deps = [":panic_default_dep"],
+    )
+
+    rust_binary(
+        name = "panic_abort_bin",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        rustc_flags = ["-Cpanic=abort"],
+        deps = [":panic_dep_group"],
+    )
+
+    use_cc_common_link_on_target(
+        name = "panic_abort_bin_with_cc_common_link",
+        target = ":panic_abort_bin",
     )
 
     rust_binary(
@@ -289,6 +368,122 @@ def _cc_common_link_test_targets():
         target_under_test = ":bin_with_cc_common_link",
     )
 
+    panic_runtime_selection_test(
+        name = "default_panic_runtime_is_unwind",
+        target_under_test = ":bin_with_cc_common_link",
+        expected_runtime = "panic_unwind",
+        unexpected_runtime = "panic_abort",
+    )
+
+    panic_runtime_selection_test(
+        name = "panic_abort_runtime_is_abort",
+        target_under_test = ":panic_abort_bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
+    )
+
+    panic_setting_selection_test(
+        name = "panic_setting_selects_abort",
+        target_under_test = ":bin_with_cc_common_link",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
+    )
+
+    panic_make_variables(name = "panic_variables")
+    rust_binary(
+        name = "panic_make_variable",
+        srcs = ["bin.rs"],
+        edition = "2021",
+        rustc_flags = ["-Cpanic=$(PANIC_STRATEGY)"],
+        tags = ["manual"],
+        toolchains = [":panic_variables"],
+    )
+    use_cc_common_link_on_target(
+        name = "panic_make_variable_cc",
+        target = ":panic_make_variable",
+    )
+    panic_runtime_selection_test(
+        name = "panic_make_variable_selects_abort",
+        target_under_test = ":panic_make_variable_cc",
+        expected_runtime = "panic_abort",
+        unexpected_runtime = "panic_unwind",
+    )
+
+    panic_setting_selection_test(
+        name = "authored_panic_overrides_setting",
+        target_under_test = ":panic_last_unwind_cc",
+        expected_runtime = "panic_unwind",
+        unexpected_runtime = "panic_abort",
+    )
+
+    rust_test(
+        name = "unsupported_abort_harness",
+        srcs = ["lib.rs"],
+        edition = "2021",
+        rustc_flags = ["-Cpanic=abort"],
+        tags = ["manual"],
+    )
+    unsupported_panic_test(
+        name = "panic_abort_harness_rejected",
+        target_under_test = ":unsupported_abort_harness",
+        message = "cc_common.link does not support panic=abort with the libtest harness",
+    )
+
+    for name, flags, std_dylib, message in [
+        ("immediate_abort", ["-Cpanic=immediate-abort"], False, "cc_common.link does not support panic=immediate-abort"),
+        ("abort_std_dylib", ["-Cpanic=abort"], True, "requires a matching std dylib"),
+    ]:
+        rust_binary(
+            name = "unsupported_" + name,
+            srcs = ["bin.rs"],
+            edition = "2021",
+            link_std_dylib = std_dylib,
+            rustc_flags = flags,
+            tags = ["manual"],
+        )
+        unsupported_panic_test(
+            name = name + "_rejected",
+            target_under_test = ":unsupported_" + name,
+            message = message,
+        )
+
+    for name, flags, expected, unexpected in [
+        ("panic_abort_split", ["-C", "panic=abort"], "panic_abort", "panic_unwind"),
+        ("panic_abort_long", ["--codegen=panic=abort"], "panic_abort", "panic_unwind"),
+        ("panic_abort_long_split", ["--codegen", "panic=abort"], "panic_abort", "panic_unwind"),
+        ("panic_last_unwind", ["-Cpanic=abort", "-Cpanic=unwind"], "panic_unwind", "panic_abort"),
+        ("panic_last_abort", ["-Cpanic=unwind", "-Cpanic=abort"], "panic_abort", "panic_unwind"),
+    ]:
+        rust_binary(
+            name = name,
+            srcs = ["bin.rs"],
+            edition = "2021",
+            rustc_flags = flags,
+            deps = [":panic_dep_group"],
+        )
+        use_cc_common_link_on_target(
+            name = name + "_cc",
+            target = ":" + name,
+        )
+        panic_runtime_selection_test(
+            name = name + "_test",
+            target_under_test = ":" + name + "_cc",
+            expected_runtime = expected,
+            unexpected_runtime = unexpected,
+        )
+
+    rust_test(
+        name = "panic_abort_runtime",
+        srcs = ["panic_runtime.rs"],
+        edition = "2021",
+        rustc_flags = ["-Cpanic=abort"],
+        use_libtest_harness = False,
+        target_compatible_with = select({
+            "@platforms//os:windows": ["@platforms//:incompatible"],
+            "//conditions:default": [],
+        }),
+    )
+
     bpf_linker_ignores_cc_args_test(
         name = "bpf_linker_ignores_cc_args_test",
         target_under_test = ":bin_with_collect_dep_actions",
@@ -306,6 +501,19 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_crate_test",
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
+        "default_panic_runtime_is_unwind",
+        "panic_abort_runtime_is_abort",
+        "panic_setting_selects_abort",
+        "panic_make_variable_selects_abort",
+        "authored_panic_overrides_setting",
+        "panic_abort_harness_rejected",
+        "immediate_abort_rejected",
+        "abort_std_dylib_rejected",
+        "panic_abort_split_test",
+        "panic_abort_long_test",
+        "panic_abort_long_split_test",
+        "panic_last_unwind_test",
+        "panic_last_abort_test",
         "bpf_linker_ignores_cc_args_test",
         "cc_common_link_attribute_test",
     ]

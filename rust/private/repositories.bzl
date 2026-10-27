@@ -74,6 +74,17 @@ _RUST_TOOLCHAIN_VERSIONS = [
     DEFAULT_NIGHTLY_VERSION,
 ]
 
+_ABORT_DEFAULT_TARGET_TRIPLES = [
+    "wasm32-wali-linux-musl",
+    "wasm32-unknown-unknown",
+    "wasm32-wasi",
+    "wasm32-wasip1",
+    "wasm32-wasip1-threads",
+    "wasm32-wasip2",
+    "wasm32v1-none",
+    "wasm64-unknown-unknown",
+]
+
 def rust_register_toolchains(
         *,
         dev_components = False,
@@ -493,6 +504,7 @@ def _rust_toolchain_tools_repository_impl(ctx):
         sha256s.update(llvm_tools_sha256)
 
     target_triple = triple(ctx.attr.target_triple)
+    default_panic_strategy = "abort" if target_triple.str in _ABORT_DEFAULT_TARGET_TRIPLES else "unwind"
     rust_stdlib_content, rust_stdlib_sha256 = load_rust_stdlib(
         ctx = ctx,
         target_triple = target_triple,
@@ -515,6 +527,7 @@ def _rust_toolchain_tools_repository_impl(ctx):
         target_triple = target_triple,
         stdlib_linkflags = stdlib_linkflags,
         default_edition = ctx.attr.edition,
+        default_panic_strategy = default_panic_strategy,
         include_rustfmt = not (not ctx.attr.rustfmt_version),
         include_llvm_tools = include_llvm_tools,
         include_linker = include_linker,
