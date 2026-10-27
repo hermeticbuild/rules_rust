@@ -2839,14 +2839,13 @@ def _should_use_rustc_allocator_libraries(toolchain):
         return toolchain._experimental_use_allocator_libraries_with_mangled_symbols_setting
     return bool(use_or_default)
 
-def _std_and_allocator_ccinfo_for_panic_strategy(info, map_field, fallback_field, panic_strategy):
-    cc_infos = getattr(info, map_field, None)
+def _std_and_allocator_ccinfo_for_panic_strategy(cc_infos, fallback, panic_strategy):
     if cc_infos != None:
         selected = cc_infos.get(panic_strategy)
         if selected != None:
             return selected
     if panic_strategy == "unwind":
-        return getattr(info, fallback_field)
+        return fallback
     fail("No std/allocator CcInfo is available for panic strategy '{}'".format(panic_strategy))
 
 def _get_std_and_alloc_info(ctx, toolchain, crate_info, link_std_dylib, panic_strategy = "unwind"):
@@ -2876,57 +2875,24 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, link_std_dylib, panic_st
         libs = ctx.attr.allocator_libraries[AllocatorLibrariesInfo]
         attr_allocator_library = libs.allocator_library
         attr_global_allocator_library = libs.global_allocator_library
-    std_prefix = "libstd"
-    if link_std_dylib:
-        std_prefix += "_dylib"
-    allocator_map_field = std_prefix + "_and_allocator_ccinfos"
-    allocator_fallback_field = std_prefix + "_and_allocator_ccinfo"
-    global_allocator_map_field = std_prefix + "_and_global_allocator_ccinfos"
-    global_allocator_fallback_field = std_prefix + "_and_global_allocator_ccinfo"
-    if is_exec_configuration(ctx):
-        if attr_allocator_library:
-            return _std_and_allocator_ccinfo_for_panic_strategy(
-                libs,
-                allocator_map_field,
-                allocator_fallback_field,
-                panic_strategy,
-            )
-        return _std_and_allocator_ccinfo_for_panic_strategy(
-            toolchain,
-            allocator_map_field,
-            allocator_fallback_field,
-            panic_strategy,
-        )
-    if toolchain._experimental_use_global_allocator:
+    if not is_exec_configuration(ctx) and toolchain._experimental_use_global_allocator:
+        info = libs if attr_global_allocator_library else toolchain
         if is_no_std(ctx, toolchain, crate_info.is_test):
-            if attr_global_allocator_library:
-                return libs.nostd_and_global_allocator_ccinfo
-            return toolchain.nostd_and_global_allocator_ccinfo
-        else:
-            if attr_global_allocator_library:
-                return _std_and_allocator_ccinfo_for_panic_strategy(
-                    libs,
-                    global_allocator_map_field,
-                    global_allocator_fallback_field,
-                    panic_strategy,
-                )
-            return _std_and_allocator_ccinfo_for_panic_strategy(
-                toolchain,
-                global_allocator_map_field,
-                global_allocator_fallback_field,
-                panic_strategy,
-            )
-    if attr_allocator_library:
+            return info.nostd_and_global_allocator_ccinfo
+        if link_std_dylib:
+            return info.libstd_dylib_and_global_allocator_ccinfo
         return _std_and_allocator_ccinfo_for_panic_strategy(
-            libs,
-            allocator_map_field,
-            allocator_fallback_field,
+            info.libstd_and_global_allocator_ccinfos if hasattr(info, "libstd_and_global_allocator_ccinfos") else None,
+            info.libstd_and_global_allocator_ccinfo,
             panic_strategy,
         )
+
+    info = libs if attr_allocator_library else toolchain
+    if link_std_dylib:
+        return info.libstd_dylib_and_allocator_ccinfo
     return _std_and_allocator_ccinfo_for_panic_strategy(
-        toolchain,
-        allocator_map_field,
-        allocator_fallback_field,
+        info.libstd_and_allocator_ccinfos if hasattr(info, "libstd_and_allocator_ccinfos") else None,
+        info.libstd_and_allocator_ccinfo,
         panic_strategy,
     )
 
