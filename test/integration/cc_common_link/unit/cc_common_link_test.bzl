@@ -185,6 +185,20 @@ custom_malloc_test = analysistest.make(
     },
 )
 
+def _libtest_selection_test(ctx):
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_under_test(env)[DepActionsInfo].actions
+    links = [action for action in actions if action.mnemonic == "CppLink"]
+    asserts.equals(env, 1, len(links))
+    if links:
+        asserts.equals(env, ctx.attr.expect_libtest, "libtest" in " ".join(links[0].argv))
+    return analysistest.end(env)
+
+libtest_selection_test = analysistest.make(
+    _libtest_selection_test,
+    attrs = {"expect_libtest": attr.bool()},
+)
+
 def _cc_common_link_test_targets():
     """Generate targets and tests."""
 
@@ -242,6 +256,31 @@ def _cc_common_link_test_targets():
         target = ":test_with_srcs",
         testonly = True,
     )
+
+    rust_test(
+        name = "test_with_custom_main",
+        srcs = ["bin.rs"],
+        edition = "2018",
+        use_libtest_harness = False,
+    )
+
+    use_cc_common_link_on_target(
+        name = "test_with_custom_main_and_cc_common_link",
+        target = ":test_with_custom_main",
+        testonly = True,
+    )
+
+    for name, target, expect_libtest in [
+        ("binary_does_not_link_libtest", ":bin_with_cc_common_link", False),
+        ("test_links_libtest", ":test_with_cc_common_link", True),
+        ("test_without_harness_does_not_link_libtest", ":test_with_custom_main_and_cc_common_link", False),
+        ("crate_test_links_libtest", ":crate_test_with_cc_common_link", True),
+    ]:
+        libtest_selection_test(
+            name = name,
+            target_under_test = target,
+            expect_libtest = expect_libtest,
+        )
 
     rust_test(
         name = "test-with-crate",
@@ -306,6 +345,10 @@ def _cc_common_link_test_targets():
         "use_cc_common_link_on_crate_test",
         "use_cc_common_link_on_cdylib",
         "custom_malloc_on_binary_test",
+        "binary_does_not_link_libtest",
+        "test_links_libtest",
+        "test_without_harness_does_not_link_libtest",
+        "crate_test_links_libtest",
         "bpf_linker_ignores_cc_args_test",
         "cc_common_link_attribute_test",
     ]

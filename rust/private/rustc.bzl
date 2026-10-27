@@ -2801,34 +2801,21 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, link_std_dylib):
         libs = ctx.attr.allocator_libraries[AllocatorLibrariesInfo]
         attr_allocator_library = libs.allocator_library
         attr_global_allocator_library = libs.global_allocator_library
+    uses_libtest_harness = crate_info.is_test and getattr(ctx.attr, "use_libtest_harness", True)
+    std_prefix = "libtest" if uses_libtest_harness else "libstd"
+    if link_std_dylib:
+        std_prefix += "_dylib"
+    allocator_field = std_prefix + "_and_allocator_ccinfo"
+    global_allocator_field = std_prefix + "_and_global_allocator_ccinfo"
     if is_exec_configuration(ctx):
-        if attr_allocator_library:
-            if link_std_dylib:
-                return libs.libstd_dylib_and_allocator_ccinfo
-            return libs.libstd_and_allocator_ccinfo
-        if link_std_dylib:
-            return toolchain.libstd_dylib_and_allocator_ccinfo
-        return toolchain.libstd_and_allocator_ccinfo
+        return getattr(libs if attr_allocator_library else toolchain, allocator_field)
     if toolchain._experimental_use_global_allocator:
         if is_no_std(ctx, toolchain, crate_info.is_test):
             if attr_global_allocator_library:
                 return libs.nostd_and_global_allocator_ccinfo
             return toolchain.nostd_and_global_allocator_ccinfo
-        else:
-            if attr_global_allocator_library:
-                if link_std_dylib:
-                    return libs.libstd_dylib_and_global_allocator_ccinfo
-                return libs.libstd_and_global_allocator_ccinfo
-            if link_std_dylib:
-                return toolchain.libstd_dylib_and_global_allocator_ccinfo
-            return toolchain.libstd_and_global_allocator_ccinfo
-    if attr_allocator_library:
-        if link_std_dylib:
-            return libs.libstd_dylib_and_allocator_ccinfo
-        return libs.libstd_and_allocator_ccinfo
-    if link_std_dylib:
-        return toolchain.libstd_dylib_and_allocator_ccinfo
-    return toolchain.libstd_and_allocator_ccinfo
+        return getattr(libs if attr_global_allocator_library else toolchain, global_allocator_field)
+    return getattr(libs if attr_allocator_library else toolchain, allocator_field)
 
 def _is_dylib(dep):
     """Determine if the dependency represents a dynamic library.
