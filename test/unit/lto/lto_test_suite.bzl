@@ -20,6 +20,7 @@ load(":shared_backends_toolchain.bzl", "shared_backends_toolchain")
 _ALLOCATOR_LIBRARIES_SETTING = str(Label("//rust/settings:experimental_use_allocator_libraries_with_mangled_symbols"))
 _CC_COMMON_LINK_SETTING = str(Label("//rust/settings:experimental_use_cc_common_link"))
 _GLOBAL_ALLOCATOR_SETTING = str(Label("//rust/settings:experimental_use_global_allocator"))
+_THIN_LINK_BITCODE_SETTING = str(Label("//rust/settings:experimental_emit_thin_link_bitcode"))
 _LLVM_LINUX_CONFIG_SETTINGS = {
     "//command_line_option:extra_toolchains": ["@llvm//toolchain:all"],
     "//command_line_option:platforms": [str(Label("@llvm//platforms:linux_x86_64"))],
@@ -148,6 +149,8 @@ def _distributed_thin_lto_library(ctx):
 
     assert_argv_contains(env, action, "--emit=link")
     assert_argv_contains_prefix(env, action, "--emit=obj=")
+    assert_argv_contains_prefix_not(env, action, "--emit=thin-link-bitcode=")
+    assert_argv_contains_not(env, action, "-Zunstable-options")
     assert_argv_contains(env, action, "-Clinker-plugin-lto")
     assert_argv_contains_prefix_not(env, action, "-Clto")
     assert_argv_contains_prefix_not(env, action, "-Cembed-bitcode")
@@ -306,6 +309,114 @@ def _distributed_thin_lto_library_shared_backend(ctx):
 _distributed_thin_lto_library_shared_backend_test = analysistest.make(
     _distributed_thin_lto_library_shared_backend,
     config_settings = _SHARED_BACKENDS_CONFIG_SETTINGS,
+)
+
+def _minimized_thin_lto_library(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    rustc = [action for action in target.actions if action.mnemonic == "Rustc"][0]
+    assert_argv_contains_prefix(env, rustc, "--emit=thin-link-bitcode=")
+    assert_argv_contains(env, rustc, "-Zunstable-options")
+    outputs = [file.basename for file in rustc.outputs.to_list()]
+    asserts.true(env, any([name.endswith(".rlib.indexing.o") for name in outputs]))
+    for action in target.actions:
+        if action.mnemonic == "RustcMetadata":
+            assert_argv_contains_prefix_not(env, action, "--emit=thin-link-bitcode=")
+            assert_argv_contains_not(env, action, "-Zunstable-options")
+            asserts.false(env, any([file.basename.endswith(".indexing.o") for file in action.outputs.to_list()]))
+            asserts.equals(env, rustc.env.get("RUSTC_BOOTSTRAP"), action.env.get("RUSTC_BOOTSTRAP"))
+    return analysistest.end(env)
+
+_minimized_thin_lto_library_test = analysistest.make(
+    _minimized_thin_lto_library,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {_THIN_LINK_BITCODE_SETTING: True},
+)
+
+_minimized_thin_lto_pipelined_library_test = analysistest.make(
+    _minimized_thin_lto_library,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
+        _THIN_LINK_BITCODE_SETTING: True,
+        str(Label("//rust/settings:pipelined_compilation")): True,
+    },
+)
+
+def _minimized_user_bootstrap(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    rustc = [action for action in target.actions if action.mnemonic == "Rustc"][0]
+    assert_argv_contains_prefix(env, rustc, "--emit=thin-link-bitcode=")
+    assert_argv_contains(env, rustc, "-Zunstable-options")
+    asserts.equals(env, "-1", rustc.env.get("RUSTC_BOOTSTRAP"))
+    assert_argv_contains_not(env, rustc, "-Zallow-features=")
+    return analysistest.end(env)
+
+_minimized_user_bootstrap_test = analysistest.make(
+    _minimized_user_bootstrap,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
+        _THIN_LINK_BITCODE_SETTING: True,
+        str(Label("//rust/settings:extra_rustc_env")): ["RUSTC_BOOTSTRAP=-1"],
+    },
+)
+
+def _minimized_thin_lto_link(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    actions = _assert_distributed_thin_lto_link(env, target)
+    indexing_inputs = [file.basename for file in actions["CppLTOIndexing"].inputs.to_list()]
+    asserts.true(env, any([name.startswith("libdistributed_lib-") and name.endswith(".rlib.indexing.o") for name in indexing_inputs]))
+    asserts.false(env, any([name.startswith("libdistributed_lib-") and name.endswith(".rlib.o") for name in indexing_inputs]))
+
+    rustc = actions.get("Rustc")
+    if rustc:
+        assert_argv_contains_prefix(env, rustc, "--emit=thin-link-bitcode=")
+        assert_argv_contains(env, rustc, "-Zunstable-options")
+
+        # Explicitly opted-in stable compilation works without metadata actions.
+        asserts.equals(env, "1", rustc.env.get("RUSTC_BOOTSTRAP"))
+        assert_argv_contains(env, rustc, "-Zallow-features=")
+        asserts.true(env, target.label.name + ".indexing.o" in indexing_inputs)
+    return analysistest.end(env)
+
+_minimized_thin_lto_binary_test = analysistest.make(
+    _minimized_thin_lto_link,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {
+        _THIN_LINK_BITCODE_SETTING: True,
+        str(Label("//rust/settings:pipelined_compilation")): False,
+    },
+)
+
+_minimized_thin_lto_cc_binary_test = analysistest.make(
+    _minimized_thin_lto_link,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {_THIN_LINK_BITCODE_SETTING: True},
+)
+
+def _minimized_disabled_without_thin_lto(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    for action in target.actions:
+        if action.mnemonic in ("Rustc", "RustcMetadata"):
+            assert_argv_contains_prefix_not(env, action, "--emit=thin-link-bitcode=")
+            assert_argv_contains_not(env, action, "-Zunstable-options")
+            asserts.false(env, any([file.basename.endswith(".indexing.o") for file in action.outputs.to_list()]))
+    return analysistest.end(env)
+
+_minimized_disabled_without_thin_lto_test = analysistest.make(
+    _minimized_disabled_without_thin_lto,
+    config_settings = {_THIN_LINK_BITCODE_SETTING: True},
+)
+
+_minimized_disabled_for_proc_macro_test = analysistest.make(
+    _minimized_disabled_without_thin_lto,
+    config_settings = _DISTRIBUTED_THIN_LTO_CONFIG_SETTINGS | {_THIN_LINK_BITCODE_SETTING: True},
+)
+
+_minimized_disabled_for_wasm_test = analysistest.make(
+    _minimized_disabled_without_thin_lto,
+    config_settings = {
+        _THIN_LINK_BITCODE_SETTING: True,
+        "//command_line_option:platforms": [str(Label("@rules_rust//rust/platform:wasm"))],
+        "//command_line_option:features": ["thin_lto"],
+    },
 )
 
 def _distributed_thin_lto_requires_allocator_setting(ctx):
@@ -592,6 +703,46 @@ def lto_test_suite(name):
         target_under_test = ":distributed_lib",
     )
 
+    _minimized_thin_lto_library_test(
+        name = "minimized_thin_lto_library_test",
+        target_under_test = ":distributed_lib",
+    )
+
+    _minimized_thin_lto_binary_test(
+        name = "minimized_thin_lto_binary_test",
+        target_under_test = ":distributed_bin",
+    )
+
+    _minimized_thin_lto_pipelined_library_test(
+        name = "minimized_thin_lto_pipelined_library_test",
+        target_under_test = ":distributed_lib",
+    )
+
+    _minimized_user_bootstrap_test(
+        name = "minimized_user_bootstrap_test",
+        target_under_test = ":distributed_lib",
+    )
+
+    _minimized_thin_lto_cc_binary_test(
+        name = "minimized_thin_lto_cc_binary_test",
+        target_under_test = ":distributed_cc_bin",
+    )
+
+    _minimized_disabled_without_thin_lto_test(
+        name = "minimized_disabled_without_thin_lto_test",
+        target_under_test = ":lib",
+    )
+
+    _minimized_disabled_for_proc_macro_test(
+        name = "minimized_disabled_for_proc_macro_test",
+        target_under_test = ":proc_macro",
+    )
+
+    _minimized_disabled_for_wasm_test(
+        name = "minimized_disabled_for_wasm_test",
+        target_under_test = ":distributed_bin",
+    )
+
     _distributed_thin_lto_binary_test(
         name = "distributed_thin_lto_binary_test",
         target_under_test = ":distributed_bin",
@@ -660,6 +811,14 @@ def lto_test_suite(name):
     native.test_suite(
         name = name,
         tests = [
+            ":minimized_thin_lto_library_test",
+            ":minimized_thin_lto_binary_test",
+            ":minimized_thin_lto_cc_binary_test",
+            ":minimized_disabled_without_thin_lto_test",
+            ":minimized_thin_lto_pipelined_library_test",
+            ":minimized_user_bootstrap_test",
+            ":minimized_disabled_for_proc_macro_test",
+            ":minimized_disabled_for_wasm_test",
             ":lto_level_default_test",
             ":lto_level_manual_test",
             ":lto_level_off_test",

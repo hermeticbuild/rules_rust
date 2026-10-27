@@ -1135,7 +1135,8 @@ def construct_arguments(
         link_std_dylib = None,
         runtime_libs = None,
         linker_plugin_lto = False,
-        bin_link_flags = None):
+        bin_link_flags = None,
+        emit_thin_link_bitcode = False):
     """Builds an Args object containing common rustc flags
 
     Args:
@@ -1202,7 +1203,7 @@ def construct_arguments(
         force_depend_on_objects (bool): Force using `.rlib` object files instead of metadata (`.rmeta`) files even if they are available.
         skip_expanding_rustc_env (bool): Whether to skip expanding CrateInfo.rustc_env_attr
         require_explicit_unstable_features (bool): Whether to require all unstable features to be explicitly opted in to using `-Zallow-features=...`.
-        inject_allow_features_guardrail (bool): When True, inject `-Zallow-features=` alongside `-Zno-codegen` to prevent silent unstable-feature enablement via RUSTC_BOOTSTRAP=1. Disabled on nightly toolchains (where unstable features are already allowed by default) and when the user manages bootstrap/allow-features themselves; gated in rustc_compile_action.
+        inject_allow_features_guardrail (bool): When True, inject `-Zallow-features=` for metadata or minimized-bitcode compilation to prevent silent unstable-feature enablement via RUSTC_BOOTSTRAP=1. Disabled on nightly toolchains (where unstable features are already allowed by default) and when the user manages bootstrap/allow-features themselves; gated in rustc_compile_action.
         error_format (str, optional): Error format to pass to the `--error-format` command line argument. If set to None, uses the "_error_format" entry in `attr`.
         allowed_unstable_rust_features (list, optional): List of unstable Rust language features allowed for this target.
         link_std_dylib (bool, optional): Whether to dynamically link the Rust standard library using
@@ -1212,6 +1213,8 @@ def construct_arguments(
         linker_plugin_lto (bool): Whether to pass `-Clinker-plugin-lto` instead
             of the `//rust/settings:lto` flags.
         bin_link_flags (File, optional): Binary-scoped build-script arguments, selected by `cargo_bin_name`.
+        emit_thin_link_bitcode (bool): Whether this action emits minimized bitcode
+            and requires `-Zunstable-options`.
 
     Returns:
         tuple: A tuple of the following items
@@ -1393,12 +1396,14 @@ def construct_arguments(
     elif crate_info.rustc_output:
         process_wrapper_flags.add("--output-file", crate_info.rustc_output)
 
-    if not build_metadata and bool(crate_info.metadata) and inject_allow_features_guardrail:
-        # Mirror the metadata action's -Zallow-features= so the bootstrap env
-        # does not silently enable unstable language features on the full
-        # compile. Gated on inject_allow_features_guardrail (computed in
-        # rustc_compile_action via _user_manages_bootstrap).
+    if not build_metadata and (bool(crate_info.metadata) or emit_thin_link_bitcode) and inject_allow_features_guardrail:
+        # Guard the full compile when bootstrap enables metadata compilation
+        # or the explicitly opted-in minimized-bitcode output. Neither should
+        # silently enable unstable language features in user code.
         rustc_flags.add("-Zallow-features=")
+
+    if emit_thin_link_bitcode:
+        rustc_flags.add("-Zunstable-options")
 
     rustc_flags.add(error_format, format = "--error-format=%s")
 
@@ -2091,6 +2096,17 @@ def rustc_compile(
     if use_cc_common_link or distributed_thin_lto or scan_msvc_archive_object:
         output_o = ctx.actions.declare_file(crate_info.output.basename + ".o", sibling = crate_info.output)
 
+    output_thin_link_bitcode = None
+    if (
+        distributed_thin_lto and
+        getattr(rust_toolchain, "_experimental_emit_thin_link_bitcode", False) and
+        not cc_common.is_enabled(
+            feature_configuration = feature_configuration,
+            feature_name = "no_use_lto_indexing_bitcode_file",
+        )
+    ):
+        output_thin_link_bitcode = ctx.actions.declare_file(crate_info.output.basename + ".indexing.o", sibling = crate_info.output)
+
     runtime_libs = get_cc_toolchain_runtime_libs(cc_toolchain, feature_configuration, crate_info.type, resolve_cc_runtime_linkage(ctx))
 
     # Determine if the build is currently running with --stamp
@@ -2132,6 +2148,8 @@ def rustc_compile(
         emit.append("link")
     if output_o:
         emit.append(("obj", output_o))
+    if output_thin_link_bitcode:
+        emit.append(("thin-link-bitcode", output_thin_link_bitcode))
 
     # Declares the outputs of the rustc compile action.
     # By default this is crate_info.output. If cc_common.link is used, this is
@@ -2239,6 +2257,7 @@ def rustc_compile(
         link_std_dylib = link_std_dylib,
         runtime_libs = runtime_libs,
         linker_plugin_lto = distributed_thin_lto,
+        emit_thin_link_bitcode = output_thin_link_bitcode != None,
     )
 
     args_metadata = None
@@ -2280,13 +2299,11 @@ def rustc_compile(
     # this is the final list of env vars
     env.update(env_from_args)
 
-    if build_metadata and inject_allow_features_guardrail:
-        # RUSTC_BOOTSTRAP=1 is required for -Zno-codegen on stable/beta rustc, and
-        # must be set on both the metadata and full actions for SVH compatibility
-        # (since RUSTC_BOOTSTRAP affects the crate hash). Skipped on nightly
-        # toolchains (where -Zno-codegen works without bootstrap) and when the
-        # user manages RUSTC_BOOTSTRAP or -Zallow-features themselves (escape
-        # hatch).
+    if (build_metadata or output_thin_link_bitcode != None) and inject_allow_features_guardrail:
+        # Stable/beta need bootstrap for -Zno-codegen and the opted-in
+        # -Zunstable-options used by minimized bitcode emission. Use it for both
+        # metadata and full actions: RUSTC_BOOTSTRAP affects the crate hash.
+        # Nightly and user-managed bootstrap/allow-features retain their policy.
         env["RUSTC_BOOTSTRAP"] = "1"
     env.update(extra_env)
 
@@ -2308,6 +2325,8 @@ def rustc_compile(
     action_outputs = list(outputs)
     if output_o and output_o not in action_outputs:
         action_outputs.append(output_o)
+    if output_thin_link_bitcode:
+        action_outputs.append(output_thin_link_bitcode)
     if rustc_output:
         action_outputs.append(rustc_output)
     if profiling_dir:
@@ -2424,7 +2443,7 @@ def rustc_compile(
         if distributed_thin_lto:
             cco_args["lto_compilation_context"] = cc_common.create_lto_compilation_context(
                 objects = {
-                    output_o: (None, []),
+                    output_o: (output_thin_link_bitcode, []),
                 },
             )
     if use_split_debuginfo:
@@ -2698,6 +2717,7 @@ def rustc_compile(
         use_pic,
         debug_context = debug_context,
         lto_object = output_o if distributed_thin_lto else None,
+        lto_indexing_object = output_thin_link_bitcode,
     )
 
     output_group_info = {}
@@ -2904,7 +2924,8 @@ def establish_cc_info(
         interface_library,
         use_pic,
         debug_context = None,
-        lto_object = None):
+        lto_object = None,
+        lto_indexing_object = None):
     """If the produced crate is suitable yield a CcInfo to allow for interop with cc rules
 
     Args:
@@ -2918,6 +2939,7 @@ def establish_cc_info(
         use_pic: (boolean): Whether the build should use PIC.
         debug_context (CcDebugContextInfo): The current debug context.
         lto_object (File): Optional full LLVM bitcode object for distributed ThinLTO.
+        lto_indexing_object (File): Optional minimized bitcode corresponding to lto_object.
 
     Returns:
         list: A list containing the `CcInfo` provider and optionally `AllocatorLibrariesImplInfo`
@@ -2966,7 +2988,7 @@ def establish_cc_info(
             if lto_object:
                 lto_compilation_context = cc_common.create_lto_compilation_context(
                     objects = {
-                        lto_object: (None, []),
+                        lto_object: (lto_indexing_object, []),
                     },
                 )
 

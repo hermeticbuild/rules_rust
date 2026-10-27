@@ -684,6 +684,7 @@ def _rust_toolchain_impl(ctx):
         require_explicit_unstable_features = _require_explicit_unstable_features(ctx),
 
         # Experimental and incompatible flags
+        _experimental_emit_thin_link_bitcode = ctx.attr._experimental_emit_thin_link_bitcode[BuildSettingInfo].value,
         _rename_first_party_crates = rename_first_party_crates,
         _third_party_dir = third_party_dir,
         _pipelined_compilation = pipelined_compilation,
@@ -796,6 +797,9 @@ rust_toolchain = rule(
         "experimental_use_cc_common_link": attr.label(
             default = Label("//rust/settings:experimental_use_cc_common_link"),
             doc = "Label to a boolean build setting that controls whether cc_common.link is used to link rust binaries.",
+        ),
+        "_experimental_emit_thin_link_bitcode": attr.label(
+            default = Label("//rust/settings:experimental_emit_thin_link_bitcode"),
         ),
         "extra_exec_rustc_flags": attr.string_list(
             doc = "Extra flags to pass to rustc in exec configuration. Subject to location expansion with respect to the srcs of the `rust_std` attribute. Subject to Make variable expansion with respect to RUST_SYSROOT, RUST_SYSROOT_SHORT, RUSTC, etc.",

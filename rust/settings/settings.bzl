@@ -145,6 +145,28 @@ def experimental_use_cc_common_link():
     )
 
 # buildifier: disable=unnamed-macro
+def experimental_emit_thin_link_bitcode():
+    """Emit minimized bitcode for distributed ThinLTO indexing.
+
+    Adds `-Zunstable-options --emit=thin-link-bitcode` to participating Rust
+    compile actions. On stable/beta, opts into `RUSTC_BOOTSTRAP` with the same
+    language-feature guard as metadata compilation, unless user-managed.
+    Requires a compiler supporting thin-link-bitcode (Rust 1.80 or newer).
+    Experimental: validate full/minimized artifact consistency for the selected
+    compiler and sanitizer configuration; see rust-lang/rust#164172.
+    The indexing linker must also accept the compiler's IR symbol table producer
+    identity. A mismatched LLVM producer can cause `Invalid record` when the
+    linker tries rebuilding the symbol table from minimized IR; matching LLVM
+    major versions alone is insufficient. Full bitcode permits that rebuild.
+    Ignored when distributed ThinLTO is disabled or unsupported, or the C++
+    toolchain enables `no_use_lto_indexing_bitcode_file`.
+    """
+    bool_flag(
+        name = "experimental_emit_thin_link_bitcode",
+        build_setting_default = False,
+    )
+
+# buildifier: disable=unnamed-macro
 def default_allocator_library():
     """A flag that determines the default allocator library for `rust_toolchain` targets."""
 
