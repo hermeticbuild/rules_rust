@@ -2802,20 +2802,26 @@ def _get_std_and_alloc_info(ctx, toolchain, crate_info, link_std_dylib):
         attr_allocator_library = libs.allocator_library
         attr_global_allocator_library = libs.global_allocator_library
     uses_libtest_harness = crate_info.is_test and getattr(ctx.attr, "use_libtest_harness", True)
-    std_prefix = "libtest" if uses_libtest_harness else "libstd"
-    if link_std_dylib:
-        std_prefix += "_dylib"
-    allocator_field = std_prefix + "_and_allocator_ccinfo"
-    global_allocator_field = std_prefix + "_and_global_allocator_ccinfo"
-    if is_exec_configuration(ctx):
-        return getattr(libs if attr_allocator_library else toolchain, allocator_field)
-    if toolchain._experimental_use_global_allocator:
+    if not is_exec_configuration(ctx) and toolchain._experimental_use_global_allocator:
+        info = libs if attr_global_allocator_library else toolchain
         if is_no_std(ctx, toolchain, crate_info.is_test):
-            if attr_global_allocator_library:
-                return libs.nostd_and_global_allocator_ccinfo
-            return toolchain.nostd_and_global_allocator_ccinfo
-        return getattr(libs if attr_global_allocator_library else toolchain, global_allocator_field)
-    return getattr(libs if attr_allocator_library else toolchain, allocator_field)
+            return info.nostd_and_global_allocator_ccinfo
+        if uses_libtest_harness:
+            if link_std_dylib:
+                return info.libtest_dylib_and_global_allocator_ccinfo
+            return info.libtest_and_global_allocator_ccinfo
+        if link_std_dylib:
+            return info.libstd_dylib_and_global_allocator_ccinfo
+        return info.libstd_and_global_allocator_ccinfo
+
+    info = libs if attr_allocator_library else toolchain
+    if uses_libtest_harness:
+        if link_std_dylib:
+            return info.libtest_dylib_and_allocator_ccinfo
+        return info.libtest_and_allocator_ccinfo
+    if link_std_dylib:
+        return info.libstd_dylib_and_allocator_ccinfo
+    return info.libstd_and_allocator_ccinfo
 
 def _is_dylib(dep):
     """Determine if the dependency represents a dynamic library.
