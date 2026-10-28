@@ -226,6 +226,10 @@ AllocatorLibrariesInfo = provider(
         "libstd_and_global_allocator_ccinfo": "Optional[CcInfo]: used when a global rust allocator is used",
         "libstd_dylib_and_allocator_ccinfo": "Optional[CcInfo]: used when the default rust allocator is used with a dylib stdlib",
         "libstd_dylib_and_global_allocator_ccinfo": "Optional[CcInfo]: used when a global rust allocator is used with a dylib stdlib",
+        "libtest_and_allocator_ccinfo": "Optional[CcInfo]: libtest and std with the default allocator",
+        "libtest_and_global_allocator_ccinfo": "Optional[CcInfo]: libtest and std with the global allocator",
+        "libtest_dylib_and_allocator_ccinfo": "Optional[CcInfo]: libtest and std with the default allocator",
+        "libtest_dylib_and_global_allocator_ccinfo": "Optional[CcInfo]: libtest and std with the global allocator",
         "nostd_and_global_allocator_ccinfo": "Optional[CcInfo]: used when nostd with a global rust allocator is used",
     },
 )
