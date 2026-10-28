@@ -549,9 +549,9 @@ fn parse_rustc_cfg_output(stdout: &str) -> BTreeMap<String, String> {
                     .or_insert_with(Vec::new)
                     .push(value[1..(value.len() - 1)].to_owned());
             }
-        } else if ["windows", "unix"].contains(&line) {
-            // the 'windows' or 'unix' line received from rustc will be turned
-            // into eg. CARGO_CFG_WINDOWS='' below
+        } else if line.starts_with("target_") || ["windows", "unix"].contains(&line) {
+            // Cargo exposes boolean cfgs as present environment variables with
+            // empty values, including target_has_reliable_f16/f128.
             values.insert(line, vec![]);
         }
     }
@@ -722,6 +722,8 @@ target_feature="sse"
 target_feature="sse2"
 target_feature="sse3"
 target_feature="ssse3"
+target_has_reliable_f16
+target_has_reliable_f128
 target_os="macos"
 target_pointer_width="64"
 target_vendor="apple"
@@ -730,6 +732,8 @@ unix
         let tree = parse_rustc_cfg_output(macos_output);
         assert_eq!(tree["CARGO_CFG_UNIX"], "");
         assert_eq!(tree["CARGO_CFG_TARGET_FAMILY"], "unix");
+        assert_eq!(tree["CARGO_CFG_TARGET_HAS_RELIABLE_F16"], "");
+        assert_eq!(tree["CARGO_CFG_TARGET_HAS_RELIABLE_F128"], "");
 
         let windows_output = r#"\
 debug_assertions
