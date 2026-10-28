@@ -1086,6 +1086,9 @@ _RUST_TEST_ATTRS = {
             E.g. `bazel test //src:rust_test --test_arg=foo::test::test_fn`.
         """),
     ),
+    "_extra_test_rustc_flag": attr.label(
+        default = Label("//rust/settings:extra_test_rustc_flag"),
+    ),
     "_test_sharding_wrapper_unix": attr.label(
         default = Label("//rust/private:test_sharding_wrapper.sh"),
         allow_single_file = True,
