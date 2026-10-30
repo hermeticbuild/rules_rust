@@ -5,8 +5,10 @@ rust_library(
     srcs = [
         "cargo_manifest_dir.rs",
         "lib.rs",
+        "vfs_overlay.rs",
     ],
     edition = "2018",
+    deps = ["@rules_rust_tinyjson//:tinyjson"],
 )
 
 rust_test(
