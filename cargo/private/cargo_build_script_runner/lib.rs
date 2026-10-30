@@ -21,6 +21,7 @@ use std::process::{Command, Output};
 pub const SUPPRESS_WARNINGS_ENV: &str = "RULES_RUST_SUPPRESS_BUILD_SCRIPT_WARNINGS";
 
 pub mod cargo_manifest_dir;
+pub mod vfs_overlay;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CompileAndLinkFlags {
