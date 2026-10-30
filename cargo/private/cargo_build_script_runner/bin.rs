@@ -124,8 +124,16 @@ fn run_buildrs() -> Result<(), String> {
         }
     }
 
-    let target_env_vars =
-        get_target_env_vars(&rustc_env).expect("Error getting target env vars from rustc");
+    // Query the configured target, not the build-script executable's flags.
+    // In particular, +crt-static changes CARGO_CFG_TARGET_FEATURE and native
+    // library selection. Decode Bazel's separator and execroot placeholders
+    // before invoking rustc, while cwd is still the execution root.
+    let encoded_rustflags = env::var("RULES_RUST_TARGET_RUSTFLAGS")
+        .unwrap_or_default()
+        .replace("\\x1f", "\x1f")
+        .replace("${pwd}", &exec_root.to_string_lossy());
+    let target_env_vars = get_target_env_vars(&rustc_env, &encoded_rustflags)
+        .expect("Error getting target env vars from rustc");
 
     let script_path = exec_root.join(&progname);
     let mut command = Command::new(&script_path);
@@ -515,7 +523,10 @@ impl Args {
     }
 }
 
-fn get_target_env_vars<P: AsRef<Path>>(rustc: &P) -> Result<BTreeMap<String, String>, String> {
+fn get_target_env_vars<P: AsRef<Path>>(
+    rustc: &P,
+    encoded_rustflags: &str,
+) -> Result<BTreeMap<String, String>, String> {
     // As done by Cargo when constructing a cargo::core::compiler::build_context::target_info::TargetInfo.
     let output = Command::new(rustc.as_ref())
         .arg("--print=cfg")
@@ -523,6 +534,7 @@ fn get_target_env_vars<P: AsRef<Path>>(rustc: &P) -> Result<BTreeMap<String, Str
             "--target={}",
             env::var("TARGET").expect("missing TARGET")
         ))
+        .args(encoded_rustflags.split('\x1f').filter(|flag| !flag.is_empty()))
         .output()
         .map_err(|err| format!("Error running rustc to get target information: {err}"))?;
     if !output.status.success() {

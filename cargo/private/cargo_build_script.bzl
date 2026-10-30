@@ -12,6 +12,7 @@ load("//rust:rust_common.bzl", "BuildInfo", "DepInfo")
 # buildifier: disable=bzl-visibility
 load(
     "//rust/private:rustc.bzl",
+    "collect_extra_rustc_flags",
     "get_compilation_mode_opts",
     "get_linker_and_args",
 )
@@ -612,14 +613,21 @@ def _cargo_build_script_impl(ctx):
         # that doing so is more likely to hurt than help. If you need to change
         # ARFLAGS, make changes to cc-rs.
 
-    # Inform build scripts of rustc flags
-    # https://github.com/rust-lang/cargo/issues/9600
-    env["CARGO_ENCODED_RUSTFLAGS"] = "\\x1f".join([
+    target_rustc_flags = [
         # Allow build scripts to locate the generated sysroot
         "--sysroot=${{pwd}}/{}".format(toolchain.sysroot),
         # Keep build scripts from baking the exec root into their output
         "--remap-path-prefix=${pwd}=.",
-    ] + ctx.attr.rustc_flags)
+    ] + collect_extra_rustc_flags(ctx, toolchain, None, "rlib")
+
+    # The cfg query describes the target crate, not the build-script executable.
+    # rustc_flags belongs to that executable and can reference compile-only data
+    # via location expansions. Do not execute those flags in the target query.
+    env["RULES_RUST_TARGET_RUSTFLAGS"] = "\\x1f".join(target_rustc_flags)
+
+    # Inform build scripts of target flags, preserving the legacy attribute.
+    # https://github.com/rust-lang/cargo/issues/9600
+    env["CARGO_ENCODED_RUSTFLAGS"] = "\\x1f".join(target_rustc_flags + ctx.attr.rustc_flags)
 
     for f in ctx.attr.crate_features:
         env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
