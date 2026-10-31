@@ -31,11 +31,13 @@ def _portable_link_flags_probe_impl(ctx):
         use_pic = False,
         ambiguous_libs = {},
         get_lib_name = get_lib_name,
+        for_windows = True,
         flavor_msvc = ctx.attr.flavor_msvc,
+        use_direct_driver = ctx.attr.use_direct_driver,
     )
 
     return [
-        DefaultInfo(files = depset([])),
+        DefaultInfo(files = depset([lib_artifact])),
         LinkFlagsInfo(flags = flags),
     ]
 
@@ -44,6 +46,7 @@ portable_link_flags_probe = rule(
     attrs = {
         "flavor_msvc": attr.bool(default = False),
         "lib_basename": attr.string(mandatory = True),
+        "use_direct_driver": attr.bool(),
     },
 )
 
@@ -101,6 +104,15 @@ def _portable_link_flags_windows_msvc_test_impl(ctx):
 portable_link_flags_windows_msvc_test = analysistest.make(
     _portable_link_flags_windows_msvc_test_impl,
 )
+
+def _direct_msvc_archive_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    archive = target[DefaultInfo].files.to_list()[0]
+    asserts.equals(env, ["-Clink-arg=" + archive.path], target[LinkFlagsInfo].flags)
+    return analysistest.end(env)
+
+direct_msvc_archive_test = analysistest.make(_direct_msvc_archive_test_impl)
 
 def _symlink_name_windows_gnu_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -193,6 +205,12 @@ cdylib_name_windows_gnu_test = unittest.make(_cdylib_name_windows_gnu_test_impl)
 
 def _define_targets():
     portable_link_flags_probe(
+        name = "direct_msvc_archive_probe",
+        flavor_msvc = True,
+        lib_basename = "libclang_rt.builtins.a",
+        use_direct_driver = True,
+    )
+    portable_link_flags_probe(
         name = "portable_link_flags_windows_gnu_probe",
         flavor_msvc = False,
         lib_basename = "libfoo.dll.a",
@@ -221,6 +239,11 @@ def windows_lib_name_test_suite(name):
         name: test suite name
     """
     _define_targets()
+
+    direct_msvc_archive_test(
+        name = "direct_msvc_archive_test",
+        target_under_test = "direct_msvc_archive_probe",
+    )
 
     portable_link_flags_windows_gnu_test(
         name = "portable_link_flags_windows_gnu_test",
@@ -253,6 +276,7 @@ def windows_lib_name_test_suite(name):
     native.test_suite(
         name = name,
         tests = [
+            "direct_msvc_archive_test",
             ":portable_link_flags_windows_gnu_test",
             ":portable_link_flags_windows_msvc_test",
             ":symlink_name_windows_gnu_test",

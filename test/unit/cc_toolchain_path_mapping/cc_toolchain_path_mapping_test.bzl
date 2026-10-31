@@ -7,6 +7,9 @@ load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
 load("//rust:defs.bzl", "rust_binary")
+
+# buildifier: disable=bzl-visibility
+load("//rust/private:rustc.bzl", "get_linker_and_args")
 load("//test/unit:common.bzl", "assert_argv_contains")
 
 def _cc_toolchain_config_impl(ctx):
@@ -39,6 +42,25 @@ def _cc_toolchain_config_impl(ctx):
                         key = "LIB",
                         value = "%{path:" + script.dirname + "}",
                     )],
+                )],
+            ), feature(
+                name = "direct_msvc",
+                flag_sets = [flag_set(
+                    actions = [ACTION_NAMES.cpp_link_executable],
+                    flag_groups = [flag_group(flags = [
+                        "/clang:-Xlinker",
+                        "/clang:/LIBPATH:sdk/lib",
+                        "/clang:-Xlinker",
+                        "/clang:/MACHINE:X64",
+                        "/clang:-Xlinker",
+                        "/clang:/vfsoverlay:sdk.json",
+                        "/clang:-Xlinker",
+                        "/clang:/lldignoreenv",
+                        "-fuse-ld=lld",
+                        "-L",
+                        "driver-only",
+                        "--sysroot=driver-only",
+                    ])],
                 )],
             )],
             toolchain_identifier = "path-mapping-test-toolchain",
@@ -111,6 +133,45 @@ _cc_toolchain_path_mapping_test = analysistest.make(
     },
 )
 
+def _direct_msvc_linker_args_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    cc_toolchain = analysistest.target_under_test(env)[platform_common.ToolchainInfo].cc
+    features = cc_common.configure_features(
+        ctx = ctx,
+        cc_toolchain = cc_toolchain,
+        requested_features = ["direct_msvc"],
+        unsupported_features = ["generated_linker_inputs"],
+    )
+    linker = cc_common.get_tool_for_action(
+        feature_configuration = features,
+        action_name = ACTION_NAMES.cpp_link_executable,
+    )
+    for preference in ["rust", None]:
+        toolchain = struct(
+            linker = struct(path = "rust-lld"),
+            linker_preference = preference,
+            linker_type = "direct",
+            target_arch = "x86_64",
+            target_os = "windows",
+            target_abi = "msvc",
+        )
+        path, direct, args, _env = get_linker_and_args(ctx, "bin", toolchain, cc_toolchain, features, depset())
+        if preference == "rust":
+            asserts.equals(env, "rust-lld", path)
+            asserts.true(env, direct)
+            asserts.equals(env, ["/LIBPATH:sdk/lib", "/MACHINE:X64", "/vfsoverlay:sdk.json", "/lldignoreenv"], args)
+        else:
+            # Merely configuring a Rust linker must not change the default.
+            asserts.equals(env, linker, path)
+            asserts.false(env, direct)
+            asserts.true(env, "/clang:-Xlinker" in args)
+    return analysistest.end(env)
+
+_direct_msvc_linker_args_test = analysistest.make(
+    _direct_msvc_linker_args_test_impl,
+    fragments = ["cpp"],
+)
+
 def cc_toolchain_path_mapping_test_suite(name):
     """Registers a regression that also runs with --experimental_output_paths=strip."""
     _cc_toolchain_config(name = "cc_toolchain_config")
@@ -153,7 +214,11 @@ def cc_toolchain_path_mapping_test_suite(name):
         }),
         target_under_test = ":subject",
     )
+    _direct_msvc_linker_args_test(
+        name = "direct_msvc_linker_args_test",
+        target_under_test = "cc_toolchain_impl",
+    )
     native.test_suite(
         name = name,
-        tests = [":cc_toolchain_path_mapping_test"],
+        tests = [":cc_toolchain_path_mapping_test", "direct_msvc_linker_args_test"],
     )
