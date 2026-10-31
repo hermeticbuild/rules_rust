@@ -12,6 +12,7 @@ load("//rust:rust_common.bzl", "BuildInfo", "DepInfo")
 # buildifier: disable=bzl-visibility
 load(
     "//rust/private:rustc.bzl",
+    "collect_configuration_rustc_flags",
     "get_compilation_mode_opts",
     "get_linker_and_args",
 )
@@ -680,6 +681,11 @@ def _cargo_build_script_impl(ctx):
     # See https://doc.rust-lang.org/cargo/reference/build-scripts.html#-sys-packages
     # for details.
     args = ctx.actions.args()
+
+    # Query this configuration, not the build-script executable or an assumed
+    # consumer crate type. Executable rustc_flags may reference compile-only data.
+    args.add(toolchain.sysroot, format = "--target_rustc_flag=--sysroot=%s")
+    args.add_all(collect_configuration_rustc_flags(ctx, toolchain), format_each = "--target_rustc_flag=%s")
     args.add(script, format = "--script=%s")
     args.add(links, format = "--links=%s")
     args.add_all([out_dir], format_each = "--out_dir=%s", expand_directories = False)

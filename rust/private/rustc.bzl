@@ -1890,6 +1890,25 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
     if crate_type in toolchain.extra_rustc_flags_for_crate_types.keys():
         flags.extend(toolchain.extra_rustc_flags_for_crate_types[crate_type])
 
+    flags.extend(collect_configuration_rustc_flags(ctx, toolchain))
+
+    if hasattr(ctx.attr, "_per_crate_rustc_flag") and not is_exec_configuration(ctx):
+        per_crate_rustc_flags = ctx.attr._per_crate_rustc_flag[PerCrateRustcFlagsInfo].per_crate_rustc_flags
+        flags.extend(_collect_per_crate_rustc_flags(ctx, crate_root, per_crate_rustc_flags))
+
+    return flags
+
+def collect_configuration_rustc_flags(ctx, toolchain):
+    """Gather configuration-wide flags without assuming a consumer crate.
+
+    Args:
+        ctx (ctx): The current rule's context object.
+        toolchain (rust_toolchain): The current Rust toolchain.
+
+    Returns:
+        List[str]: Toolchain and available build-setting flags, in compiler order.
+    """
+    flags = []
     is_exec = is_exec_configuration(ctx)
 
     flags.extend(toolchain.extra_exec_rustc_flags if is_exec else toolchain.extra_rustc_flags)
@@ -1899,10 +1918,6 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
 
     if hasattr(ctx.attr, "_extra_rustc_flag") and not is_exec:
         flags.extend(ctx.attr._extra_rustc_flag[ExtraRustcFlagsInfo].extra_rustc_flags)
-
-    if hasattr(ctx.attr, "_per_crate_rustc_flag") and not is_exec:
-        per_crate_rustc_flags = ctx.attr._per_crate_rustc_flag[PerCrateRustcFlagsInfo].per_crate_rustc_flags
-        flags.extend(_collect_per_crate_rustc_flags(ctx, crate_root, per_crate_rustc_flags))
 
     if hasattr(ctx.attr, "_extra_exec_rustc_flags") and is_exec:
         flags.extend(ctx.attr._extra_exec_rustc_flags[ExtraExecRustcFlagsInfo].extra_exec_rustc_flags)
