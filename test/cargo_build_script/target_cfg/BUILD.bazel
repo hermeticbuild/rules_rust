@@ -1,0 +1,19 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//cargo:defs.bzl", "cargo_build_script")
+
+cargo_build_script(
+    name = "build_script",
+    srcs = ["build.rs"],
+    # Exercise the runner's cfg query without compiling any Windows code.
+    build_script_env = {
+        "RULES_RUST_TARGET_RUSTFLAGS": "-Ctarget-feature=+crt-static",
+        "TARGET": "x86_64-pc-windows-msvc",
+    },
+    rustc_flags = ["--cfg=build_script_only"],
+    use_cc_toolchain = 0,
+)
+
+build_test(
+    name = "target_cfg_test",
+    targets = ["build_script"],
+)
