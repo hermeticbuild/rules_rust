@@ -15,5 +15,8 @@ rust_library_without_process_wrapper(
         "@platforms//os:windows": ["-Cstrip=debuginfo"],
         "//conditions:default": [],
     }),
-    visibility = ["@rules_rust//util/process_wrapper:__pkg__"],
+    visibility = [
+        "@rules_rust//cargo/private/cargo_build_script_runner:__pkg__",
+        "@rules_rust//util/process_wrapper:__pkg__",
+    ],
 )

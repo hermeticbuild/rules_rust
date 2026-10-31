@@ -303,13 +303,45 @@ _PWD_FLAG_PASSES = [
     _pwd_flags_direct_libs,
 ]
 
-def _pwd_flags(args):
+def _rebase_json_vfs_flags(args, overlays, out_dir):
+    """Copy JSON overlays at execution time before changing the working directory."""
+    result = []
+    expect_path = False
+    for arg in args:
+        if expect_path and arg == "-Xclang":
+            result.append(arg)
+            continue
+        prefix = None
+        if expect_path:
+            prefix = ""
+        else:
+            for flag in ["-ivfsoverlay", "-vfsoverlay=", "-vfsoverlay", "/vfsoverlay:", "/vfsoverlay"]:
+                if arg == flag and not flag.endswith(("=", ":")):
+                    expect_path = True
+                    break
+                if arg.startswith(flag) and len(arg) > len(flag):
+                    prefix = flag
+                    break
+        if prefix != None:
+            source = arg[len(prefix):]
+            if source not in overlays:
+                overlays[source] = "${{pwd}}/{}/.rules_rust_vfs_{}.json".format(out_dir, len(overlays))
+            result.append(prefix + overlays[source])
+            expect_path = False
+        else:
+            result.append(arg)
+    return result
+
+def _pwd_flags(args, overlays = None, out_dir = None):
     clang_cl_prefix = "/clang:"
     clang_cl_wrapped = [arg.startswith(clang_cl_prefix) for arg in args]
     args = [arg[len(clang_cl_prefix):] if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
 
     for pwd_flags_pass in _PWD_FLAG_PASSES:
         args = pwd_flags_pass(args)
+
+    if overlays != None:
+        args = _rebase_json_vfs_flags(args, overlays, out_dir)
 
     return [clang_cl_prefix + arg if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
 
@@ -549,10 +581,13 @@ def _cargo_build_script_impl(ctx):
         cc_toolchain, feature_configuration = find_cc_toolchain(ctx)
     else:
         cc_toolchain, feature_configuration = None, None
+
+    # Explicit opt-in: arbitrary YAML is not parsed by the JSON adapter.
+    vfs_overlays = {} if _feature_enabled(ctx, "cargo-rebase-json-vfs-overlays") else None
     linker, _, link_args, linker_env = get_linker_and_args(ctx, "bin", toolchain, cc_toolchain, feature_configuration, None)
     env.update(**linker_env)
     env["LD"] = linker
-    env["LDFLAGS"] = " ".join(_pwd_flags(link_args))
+    env["LDFLAGS"] = " ".join(_pwd_flags(link_args, vfs_overlays, out_dir.path))
 
     # Defaults for cxx flags.
     env["ARFLAGS"] = ""
@@ -606,11 +641,17 @@ def _cargo_build_script_impl(ctx):
             prefix_map_args = ["-ffile-prefix-map=${pwd}=.", "-fdebug-prefix-map=${pwd}=."]
             cc_c_args = cc_c_args + prefix_map_args
             cc_cxx_args = cc_cxx_args + prefix_map_args
-        env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args))
-        env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args))
+        env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args, vfs_overlays, out_dir.path))
+        env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args, vfs_overlays, out_dir.path))
         # It may be tempting to forward ARFLAGS, but cc-rs is opinionated enough
         # that doing so is more likely to hurt than help. If you need to change
         # ARFLAGS, make changes to cc-rs.
+
+    if vfs_overlays:
+        env["RULES_RUST_JSON_VFS_OVERLAYS"] = json.encode({
+            source.removeprefix("${pwd}/"): destination.removeprefix("${pwd}/")
+            for source, destination in vfs_overlays.items()
+        })
 
     # Inform build scripts of rustc flags
     # https://github.com/rust-lang/cargo/issues/9600

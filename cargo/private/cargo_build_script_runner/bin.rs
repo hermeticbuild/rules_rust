@@ -181,10 +181,12 @@ fn run_buildrs() -> Result<(), String> {
         );
     }
 
+    let overlays = cargo_build_script_runner::vfs_overlay::PreparedOverlays::from_env(&exec_root, &out_dir_abs)?;
     let emit_warnings = env::var_os(SUPPRESS_WARNINGS_ENV).is_none_or(|v| v != "1");
 
-    let (buildrs_outputs, process_output) =
-        BuildScriptOutput::outputs_from_command(&mut command, emit_warnings).map_err(
+    let result = BuildScriptOutput::outputs_from_command(&mut command, emit_warnings);
+    overlays.remove()?;
+    let (buildrs_outputs, process_output) = result.map_err(
             |process_output| {
                 format!(
                     "Build script process failed{}\n--stdout:\n{}\n--stderr:\n{}",
