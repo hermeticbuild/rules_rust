@@ -174,14 +174,18 @@ mod tests {
             .unwrap().parse().unwrap()
     }
 
+    fn assert_path(value: &JsonValue, expected: &str) {
+        assert_eq!(Path::new(value.get::<String>().unwrap()), Path::new(expected));
+    }
+
     #[test]
     fn cwd_relative_roots_and_external_paths_become_absolute() {
         let value = rewrite(r#"{"version":0,"case-sensitive":false,"roots":[
             {"type":"directory","name":"SDK space","contents":[
                 {"type":"file","name":"Header.H","external-contents":"SDK space/header.h"}]}]}"#);
-        assert_eq!(value["roots"][0]["name"], JsonValue::String("/exec/SDK space".into()));
+        assert_path(&value["roots"][0]["name"], "/exec/SDK space");
         assert_eq!(value["roots"][0]["contents"][0]["name"], JsonValue::String("Header.H".into()));
-        assert_eq!(value["roots"][0]["contents"][0]["external-contents"], JsonValue::String("/exec/SDK space/header.h".into()));
+        assert_path(&value["roots"][0]["contents"][0]["external-contents"], "/exec/SDK space/header.h");
         assert_eq!(value["case-sensitive"], JsonValue::Boolean(false));
     }
 
@@ -190,8 +194,8 @@ mod tests {
         let value = rewrite(r#"{"version":0,"root-relative":"overlay-dir","overlay-relative":true,
             "use-external-names":false,"redirecting-with":"fallback","roots":[
             {"type":"directory-remap","name":"virtual","external-contents":"real"}]}"#);
-        assert_eq!(value["roots"][0]["name"], JsonValue::String("/exec/overlays/virtual".into()));
-        assert_eq!(value["roots"][0]["external-contents"], JsonValue::String("/exec/overlays/real".into()));
+        assert_path(&value["roots"][0]["name"], "/exec/overlays/virtual");
+        assert_path(&value["roots"][0]["external-contents"], "/exec/overlays/real");
         assert_eq!(value["use-external-names"], JsonValue::Boolean(false));
         assert_eq!(value["redirecting-with"], JsonValue::String("fallback".into()));
         assert_eq!(value["overlay-relative"], JsonValue::Boolean(false));
