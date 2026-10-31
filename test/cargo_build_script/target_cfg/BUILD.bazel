@@ -1,19 +1,59 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//cargo:defs.bzl", "cargo_build_script")
+load(":target_cfg_test.bzl", "configured_build_script", "query_toolchain")
+
+constraint_setting(name = "cfg_query")
+
+constraint_value(
+    name = "cfg_query_enabled",
+    constraint_setting = "cfg_query",
+)
+
+platform(
+    name = "windows_query",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+        "cfg_query_enabled",
+    ],
+)
+
+query_toolchain(name = "query_toolchain_impl")
+
+toolchain(
+    name = "query_toolchain",
+    target_compatible_with = ["cfg_query_enabled"],
+    toolchain = "query_toolchain_impl",
+    toolchain_type = "//rust:toolchain_type",
+)
+
+write_file(
+    name = "script_flags",
+    out = "script_flags.rsp",
+    content = [
+        "--cfg=build_script_only",
+        "--cfg=target_feature=\"build_script_only\"",
+        "-Aexplicit_builtin_cfgs_in_flags",
+        "",
+    ],
+)
 
 cargo_build_script(
     name = "build_script",
     srcs = ["build.rs"],
-    # Exercise the runner's cfg query without compiling any Windows code.
-    build_script_env = {
-        "RULES_RUST_TARGET_RUSTFLAGS": "-Ctarget-feature=+crt-static",
-        "TARGET": "x86_64-pc-windows-msvc",
-    },
-    rustc_flags = ["--cfg=build_script_only"],
+    compile_data = ["script_flags"],
+    rustc_flags = ["@$(location script_flags)"],
+    tags = ["manual"],
     use_cc_toolchain = 0,
+)
+
+configured_build_script(
+    name = "configured_build_script",
+    script = "build_script",
 )
 
 build_test(
     name = "target_cfg_test",
-    targets = ["build_script"],
+    targets = ["configured_build_script"],
 )
