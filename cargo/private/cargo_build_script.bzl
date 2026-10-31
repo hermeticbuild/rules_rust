@@ -12,7 +12,7 @@ load("//rust:rust_common.bzl", "BuildInfo", "DepInfo")
 # buildifier: disable=bzl-visibility
 load(
     "//rust/private:rustc.bzl",
-    "collect_extra_rustc_flags",
+    "collect_configuration_rustc_flags",
     "get_compilation_mode_opts",
     "get_linker_and_args",
 )
@@ -613,21 +613,14 @@ def _cargo_build_script_impl(ctx):
         # that doing so is more likely to hurt than help. If you need to change
         # ARFLAGS, make changes to cc-rs.
 
-    target_rustc_flags = [
+    # Inform build scripts of rustc flags
+    # https://github.com/rust-lang/cargo/issues/9600
+    env["CARGO_ENCODED_RUSTFLAGS"] = "\\x1f".join([
         # Allow build scripts to locate the generated sysroot
         "--sysroot=${{pwd}}/{}".format(toolchain.sysroot),
         # Keep build scripts from baking the exec root into their output
         "--remap-path-prefix=${pwd}=.",
-    ] + collect_extra_rustc_flags(ctx, toolchain, None, "rlib")
-
-    # The cfg query describes the target crate, not the build-script executable.
-    # rustc_flags belongs to that executable and can reference compile-only data
-    # via location expansions. Do not execute those flags in the target query.
-    env["RULES_RUST_TARGET_RUSTFLAGS"] = "\\x1f".join(target_rustc_flags)
-
-    # Inform build scripts of target flags, preserving the legacy attribute.
-    # https://github.com/rust-lang/cargo/issues/9600
-    env["CARGO_ENCODED_RUSTFLAGS"] = "\\x1f".join(target_rustc_flags + ctx.attr.rustc_flags)
+    ] + ctx.attr.rustc_flags)
 
     for f in ctx.attr.crate_features:
         env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
@@ -688,6 +681,11 @@ def _cargo_build_script_impl(ctx):
     # See https://doc.rust-lang.org/cargo/reference/build-scripts.html#-sys-packages
     # for details.
     args = ctx.actions.args()
+
+    # Query this configuration, not the build-script executable or an assumed
+    # consumer crate type. Executable rustc_flags may reference compile-only data.
+    args.add(toolchain.sysroot, format = "--target_rustc_flag=--sysroot=%s")
+    args.add_all(collect_configuration_rustc_flags(ctx, toolchain), format_each = "--target_rustc_flag=%s")
     args.add(script, format = "--script=%s")
     args.add(links, format = "--links=%s")
     args.add_all([out_dir], format_each = "--out_dir=%s", expand_directories = False)

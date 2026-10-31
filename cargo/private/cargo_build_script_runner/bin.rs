@@ -87,6 +87,7 @@ fn run_buildrs() -> Result<(), String> {
         stdout_path,
         stderr_path,
         input_dep_env_paths,
+        target_rustc_flags,
         cargo_manifest_maker,
         allow_build_script_to_detect_nonhermetic_paths,
     } = Args::parse();
@@ -124,15 +125,12 @@ fn run_buildrs() -> Result<(), String> {
         }
     }
 
-    // Query the configured target, not the build-script executable's flags.
-    // In particular, +crt-static changes CARGO_CFG_TARGET_FEATURE and native
-    // library selection. Decode Bazel's separator and execroot placeholders
-    // before invoking rustc, while cwd is still the execution root.
-    let encoded_rustflags = env::var("RULES_RUST_TARGET_RUSTFLAGS")
-        .unwrap_or_default()
-        .replace("\\x1f", "\x1f")
-        .replace("${pwd}", &exec_root.to_string_lossy());
-    let target_env_vars = get_target_env_vars(&rustc_env, &encoded_rustflags)
+    // Query before changing cwd so toolchain paths resolve from the execroot.
+    let target_rustc_flags: Vec<_> = target_rustc_flags
+        .iter()
+        .map(|flag| flag.replace("${pwd}", &exec_root.to_string_lossy()))
+        .collect();
+    let target_env_vars = get_target_env_vars(&rustc_env, &target_rustc_flags)
         .expect("Error getting target env vars from rustc");
 
     let script_path = exec_root.join(&progname);
@@ -435,6 +433,7 @@ struct Args {
     stdout_path: Option<String>,
     stderr_path: Option<String>,
     input_dep_env_paths: Vec<String>,
+    target_rustc_flags: Vec<String>,
     cargo_manifest_maker: RunfilesMaker,
     allow_build_script_to_detect_nonhermetic_paths: bool,
 }
@@ -463,6 +462,7 @@ impl Args {
         let mut stdout_path = None;
         let mut stderr_path = None;
         let mut input_dep_env_paths = Vec::new();
+        let mut target_rustc_flags = Vec::new();
         let mut cargo_manifest_maker: Result<RunfilesMaker, String> =
             Err("Argument `cargo_manifest_args` not provided".to_owned());
         let mut allow_build_script_to_detect_nonhermetic_paths = false;
@@ -494,6 +494,8 @@ impl Args {
                 stderr_path = Some(arg.split_off("--stderr=".len()));
             } else if arg.starts_with("--input_dep_env_path=") {
                 input_dep_env_paths.push(arg.split_off("--input_dep_env_path=".len()));
+            } else if arg.starts_with("--target_rustc_flag=") {
+                target_rustc_flags.push(arg.split_off("--target_rustc_flag=".len()));
             } else if arg.starts_with("--cargo_manifest_args=") {
                 cargo_manifest_maker = Ok(RunfilesMaker::from_param_file(
                     &arg.split_off("--cargo_manifest_args=".len()),
@@ -517,6 +519,7 @@ impl Args {
             stdout_path,
             stderr_path,
             input_dep_env_paths,
+            target_rustc_flags,
             cargo_manifest_maker: cargo_manifest_maker.unwrap(),
             allow_build_script_to_detect_nonhermetic_paths,
         }
@@ -525,7 +528,7 @@ impl Args {
 
 fn get_target_env_vars<P: AsRef<Path>>(
     rustc: &P,
-    encoded_rustflags: &str,
+    target_rustc_flags: &[String],
 ) -> Result<BTreeMap<String, String>, String> {
     // As done by Cargo when constructing a cargo::core::compiler::build_context::target_info::TargetInfo.
     let output = Command::new(rustc.as_ref())
@@ -534,7 +537,7 @@ fn get_target_env_vars<P: AsRef<Path>>(
             "--target={}",
             env::var("TARGET").expect("missing TARGET")
         ))
-        .args(encoded_rustflags.split('\x1f').filter(|flag| !flag.is_empty()))
+        .args(target_rustc_flags)
         .output()
         .map_err(|err| format!("Error running rustc to get target information: {err}"))?;
     if !output.status.success() {
