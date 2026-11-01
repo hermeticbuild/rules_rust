@@ -60,7 +60,7 @@ def make_libstd_and_allocator_ccinfo(
           This should be a struct with either:
           * a cc_info field of type CcInfo
           * an allocator_libraries_impl_info field, which should be None or of type AllocatorLibrariesImplInfo.
-        std: Standard library flavor. Currently only "std" and "no_std_with_alloc" are supported,
+        std: Standard library flavor. Currently "std", "test", and "no_std_with_alloc" are supported,
              accompanied with the default panic behavior.
 
 
@@ -217,6 +217,11 @@ def make_libstd_and_allocator_ccinfo(
         if std == "std":
             link_inputs = cc_common.create_linker_input(
                 owner = rust_std.label,
+                libraries = std_inputs,
+            )
+        elif std == "test":
+            link_inputs = cc_common.create_linker_input(
+                owner = rust_std.label,
                 libraries = test_inputs,
             )
         elif std == "no_std_with_alloc":
@@ -279,10 +284,14 @@ def _rust_allocator_libraries_impl(ctx):
         allocator_library = allocator_library,
         global_allocator_library = global_allocator_library,
         libstd_and_allocator_ccinfo = make_cc_info(allocator_library, "std", False),
+        libtest_and_allocator_ccinfo = make_cc_info(allocator_library, "test", False),
         libstd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std", False),
+        libtest_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "test", False),
         nostd_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "no_std_with_alloc", False),
         libstd_dylib_and_allocator_ccinfo = make_cc_info(allocator_library, "std", True),
+        libtest_dylib_and_allocator_ccinfo = make_cc_info(allocator_library, "test", True),
         libstd_dylib_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "std", True),
+        libtest_dylib_and_global_allocator_ccinfo = make_cc_info(global_allocator_library, "test", True),
     )]
 
     return providers
