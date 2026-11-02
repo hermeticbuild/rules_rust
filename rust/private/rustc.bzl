@@ -1890,6 +1890,25 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
     if crate_type in toolchain.extra_rustc_flags_for_crate_types.keys():
         flags.extend(toolchain.extra_rustc_flags_for_crate_types[crate_type])
 
+    flags.extend(collect_configuration_rustc_flags(ctx, toolchain))
+
+    if hasattr(ctx.attr, "_per_crate_rustc_flag") and not is_exec_configuration(ctx):
+        per_crate_rustc_flags = ctx.attr._per_crate_rustc_flag[PerCrateRustcFlagsInfo].per_crate_rustc_flags
+        flags.extend(_collect_per_crate_rustc_flags(ctx, crate_root, per_crate_rustc_flags))
+
+    return flags
+
+def collect_configuration_rustc_flags(ctx, toolchain):
+    """Gather configuration-wide flags without assuming a consumer crate.
+
+    Args:
+        ctx (ctx): The current rule's context object.
+        toolchain (rust_toolchain): The current Rust toolchain.
+
+    Returns:
+        List[str]: Toolchain and available build-setting flags, in compiler order.
+    """
+    flags = []
     is_exec = is_exec_configuration(ctx)
 
     flags.extend(toolchain.extra_exec_rustc_flags if is_exec else toolchain.extra_rustc_flags)
@@ -1900,10 +1919,6 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
     if hasattr(ctx.attr, "_extra_rustc_flag") and not is_exec:
         flags.extend(ctx.attr._extra_rustc_flag[ExtraRustcFlagsInfo].extra_rustc_flags)
 
-    if hasattr(ctx.attr, "_per_crate_rustc_flag") and not is_exec:
-        per_crate_rustc_flags = ctx.attr._per_crate_rustc_flag[PerCrateRustcFlagsInfo].per_crate_rustc_flags
-        flags.extend(_collect_per_crate_rustc_flags(ctx, crate_root, per_crate_rustc_flags))
-
     if hasattr(ctx.attr, "_extra_exec_rustc_flags") and is_exec:
         flags.extend(ctx.attr._extra_exec_rustc_flags[ExtraExecRustcFlagsInfo].extra_exec_rustc_flags)
 
@@ -1911,6 +1926,37 @@ def collect_extra_rustc_flags(ctx, toolchain, crate_root, crate_type):
         flags.extend(ctx.attr._extra_exec_rustc_flag[ExtraExecRustcFlagsInfo].extra_exec_rustc_flags)
 
     return flags
+
+def collect_cfg_query_rustc_flags(ctx, toolchain):
+    """Prepare configuration-wide flags for rustc's source-free cfg query.
+
+    Args:
+        ctx (ctx): The current rule's context object.
+        toolchain (rust_toolchain): The current Rust toolchain.
+
+    Returns:
+        List[str]: Query flags, retaining the configuration's compiler order.
+    """
+
+    # No crate features are used by this query. Reuse compilation's extraction
+    # without re-emitting a feature allowlist for a nonexistent crate.
+    flags = _extract_allowed_unstable_features_from_flags(
+        collect_configuration_rustc_flags(ctx, toolchain),
+        [],
+    )
+
+    # Diagnostic presentation does not affect cfg stdout. Compilation may force
+    # JSON independently of the display setting; this query has no such context.
+    query_flags = []
+    skip_value = False
+    for flag in flags:
+        if skip_value:
+            skip_value = False
+        elif flag in ["--json", "--error-format"]:
+            skip_value = True
+        elif not flag.startswith(("--json=", "--error-format=")):
+            query_flags.append(flag)
+    return query_flags
 
 def setup_zself_profile(ctx, crate_info):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
