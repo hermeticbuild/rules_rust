@@ -1927,6 +1927,37 @@ def collect_configuration_rustc_flags(ctx, toolchain):
 
     return flags
 
+def collect_cfg_query_rustc_flags(ctx, toolchain):
+    """Prepare configuration-wide flags for rustc's source-free cfg query.
+
+    Args:
+        ctx (ctx): The current rule's context object.
+        toolchain (rust_toolchain): The current Rust toolchain.
+
+    Returns:
+        List[str]: Query flags, retaining the configuration's compiler order.
+    """
+
+    # No crate features are used by this query. Reuse compilation's extraction
+    # without re-emitting a feature allowlist for a nonexistent crate.
+    flags = _extract_allowed_unstable_features_from_flags(
+        collect_configuration_rustc_flags(ctx, toolchain),
+        [],
+    )
+
+    # Diagnostic presentation does not affect cfg stdout. Compilation may force
+    # JSON independently of the display setting; this query has no such context.
+    query_flags = []
+    skip_value = False
+    for flag in flags:
+        if skip_value:
+            skip_value = False
+        elif flag in ["--json", "--error-format"]:
+            skip_value = True
+        elif not flag.startswith(("--json=", "--error-format=")):
+            query_flags.append(flag)
+    return query_flags
+
 def setup_zself_profile(ctx, crate_info):
     """Sets up rustc self-profiling if enabled by zself_profile_events.
 

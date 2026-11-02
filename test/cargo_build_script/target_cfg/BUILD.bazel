@@ -1,6 +1,7 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//cargo:defs.bzl", "cargo_build_script")
+load("//rust:defs.bzl", "rust_library")
 load(":target_cfg_test.bzl", "configured_build_script", "query_toolchain")
 
 constraint_setting(name = "cfg_query")
@@ -17,6 +18,12 @@ platform(
         "@platforms//os:windows",
         "cfg_query_enabled",
     ],
+)
+
+platform(
+    name = "native_query",
+    constraint_values = ["cfg_query_enabled"],
+    parents = ["@platforms//host"],
 )
 
 query_toolchain(name = "query_toolchain_impl")
@@ -57,3 +64,100 @@ build_test(
     name = "target_cfg_test",
     targets = ["configured_build_script"],
 )
+
+cargo_build_script(
+    name = "options_build_script",
+    srcs = ["options.rs"],
+    tags = ["manual"],
+    use_cc_toolchain = 0,
+)
+
+rust_library(
+    name = "options_library",
+    srcs = ["options.rs"],
+    tags = ["manual"],
+)
+
+[
+    query_toolchain(
+        name = name + "_toolchain_impl",
+        explicit_sysroot = explicit_sysroot,
+        extra_rustc_flags = flags,
+        windows = False,
+    )
+    for name, explicit_sysroot, flags in [
+        ("explicit_sysroot", True, []),
+        (
+            "allow_features",
+            False,
+            ["-Zallow-features=let_chains"],
+        ),
+        (
+            "json_diagnostics",
+            False,
+            ["--json=diagnostic-short"],
+        ),
+        # Captured diagnostics force JSON even with human display.
+        (
+            "split_json_diagnostics",
+            False,
+            [
+                "--json",
+                "diagnostic-short",
+            ],
+        ),
+    ]
+]
+
+[
+    toolchain(
+        name = name + "_toolchain",
+        target_compatible_with = ["cfg_query_enabled"],
+        toolchain = name + "_toolchain_impl",
+        toolchain_type = "//rust:toolchain_type",
+    )
+    for name in [
+        "explicit_sysroot",
+        "allow_features",
+        "json_diagnostics",
+        "split_json_diagnostics",
+    ]
+]
+
+[
+    configured_build_script(
+        name = name + "_" + kind,
+        capture_diagnostics = name == "split_json_diagnostics",
+        error_format = "json" if name == "json_diagnostics" else "human",
+        generated_sysroot = name != "explicit_sysroot",
+        script = "options_" + kind,
+        toolchain = name + "_toolchain",
+        windows = False,
+    )
+    for name in [
+        "explicit_sysroot",
+        "allow_features",
+        "json_diagnostics",
+        "split_json_diagnostics",
+    ]
+    for kind in [
+        "build_script",
+        "library",
+    ]
+]
+
+[
+    build_test(
+        name = name + "_test",
+        targets = [
+            name + "_build_script",
+            name + "_library",
+        ],
+    )
+    for name in [
+        "explicit_sysroot",
+        "allow_features",
+        "json_diagnostics",
+        "split_json_diagnostics",
+    ]
+]
