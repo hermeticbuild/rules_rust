@@ -112,7 +112,8 @@ pub fn rebase_json(source: &str, original: &Path, exec_root: &Path) -> Result<St
     for root in roots {
         rewrite_entry(root, root_base, external_base, true, overlay_relative)?;
     }
-    object.insert("root-relative".into(), JsonValue::String("cwd".into()));
+    // Absolute roots no longer need this LLVM 16+ lookup-base option.
+    object.remove("root-relative");
     object.insert("overlay-relative".into(), JsonValue::Boolean(false));
     document.stringify().map_err(|error| error.to_string())
 }
@@ -187,6 +188,10 @@ mod tests {
         assert_eq!(value["roots"][0]["contents"][0]["name"], JsonValue::String("Header.H".into()));
         assert_path(&value["roots"][0]["contents"][0]["external-contents"], "/exec/SDK space/header.h");
         assert_eq!(value["case-sensitive"], JsonValue::Boolean(false));
+        assert!(!value
+            .get::<HashMap<String, JsonValue>>()
+            .unwrap()
+            .contains_key("root-relative"));
     }
 
     #[test]
@@ -199,6 +204,10 @@ mod tests {
         assert_eq!(value["use-external-names"], JsonValue::Boolean(false));
         assert_eq!(value["redirecting-with"], JsonValue::String("fallback".into()));
         assert_eq!(value["overlay-relative"], JsonValue::Boolean(false));
+        assert!(!value
+            .get::<HashMap<String, JsonValue>>()
+            .unwrap()
+            .contains_key("root-relative"));
     }
 
     #[test]
