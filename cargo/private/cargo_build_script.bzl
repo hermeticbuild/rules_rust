@@ -133,6 +133,8 @@ def _should_prefix_pwd(path):
 def _expects_space_separated_arg(flag):
     return not (flag.endswith("=") or flag.endswith(":"))
 
+_CLANG_FORWARDING_FLAGS = ("-Xclang", "-Xpreprocessor")
+
 def _prefix_pwd_to_flag(args, flag_variations):
     """Prefix execroot-relative paths for flags that support both concatenated and space-separated forms (unless it ends with `=` or `:`).
 
@@ -155,7 +157,7 @@ def _prefix_pwd_to_flag(args, flag_variations):
         # map the next argument instead.
         # ex: -Xclang -internal-isystem -Xclang path
         # to: -Xclang -internal-isystem -Xclang ${pwd}/path
-        if prefix_next_arg and arg in ("-Xclang", "-Xpreprocessor"):
+        if prefix_next_arg and arg in _CLANG_FORWARDING_FLAGS:
             res.append(arg)
             continue
 
@@ -308,7 +310,7 @@ def _rebase_json_vfs_flags(args, overlays, out_dir):
     result = []
     expect_path = False
     for arg in args:
-        if expect_path and arg == "-Xclang":
+        if expect_path and arg in _CLANG_FORWARDING_FLAGS:
             result.append(arg)
             continue
         prefix = None

@@ -19,6 +19,7 @@ load(
     "isystem_absolute_test",
     "isystem_after_relative_test",
     "isystem_relative_test",
+    "json_vfs_forwarding_test",
     "legacy_cc_toolchain_test",
     "libpath_absolute_test",
     "libpath_relative_test",
@@ -100,3 +101,5 @@ direct_libs_as_flag_operand_test(name = "direct_libs_as_flag_operand_test")
 user_compile_flags_test(name = "user_compile_flags_test")
 
 forwarded_header_paths_test(name = "forwarded_header_paths_test")
+
+json_vfs_forwarding_test(name = "json_vfs_forwarding_test")
