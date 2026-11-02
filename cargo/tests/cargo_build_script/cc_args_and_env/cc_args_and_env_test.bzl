@@ -222,6 +222,12 @@ def _cc_args_and_env_analysis_test_impl(ctx):
     tut = analysistest.target_under_test(env)
     cargo_action = tut[DepActionsInfo].actions[0]
 
+    overlay_path = ""
+    if ctx.attr.expected_vfs_source:
+        runfiles_dir = [output for output in cargo_action.outputs.to_list() if output.path.endswith(".crf")][0]
+        overlay_path = runfiles_dir.path + "/.rules_rust_vfs_0.json"
+        asserts.equals(env, {ctx.attr.expected_vfs_source: overlay_path}, json.decode(cargo_action.env["RULES_RUST_JSON_VFS_OVERLAYS"]))
+
     for env_var, expected_path in _EXPECTED_CC_TOOLCHAIN_TOOLS.items():
         if env_var == "AR" and ctx.attr.expect_llvm_ar:
             expected_path = ctx.file._llvm_ar.path
@@ -258,6 +264,7 @@ def _cc_args_and_env_analysis_test_impl(ctx):
         if not cargo_action.env["TARGET"].endswith("-msvc"):
             expected_flags = expected_flags + ["-ffile-prefix-map=${pwd}=.", "-fdebug-prefix-map=${pwd}=."]
         for flag in expected_flags:
+            flag = flag.replace("${vfs_overlay}", "${pwd}/" + overlay_path)
             asserts.true(
                 env,
                 flag in actual_flags,
@@ -297,6 +304,7 @@ _CC_ARGS_AND_ENV_TEST_ATTRS = {
     "expected_cflags": attr.string_list(default = ["-Wall"]),
     "expected_cxxflags": attr.string_list(default = ["-fno-rtti"]),
     "expected_include": attr.string(default = ""),
+    "expected_vfs_source": attr.string(),
     "forbidden_cflags": attr.string_list(),
     "forbidden_cxxflags": attr.string_list(),
     "legacy_cc_toolchain": attr.bool(default = False),
@@ -321,6 +329,7 @@ def cargo_build_script_with_extra_cc_compile_flags(
         extra_cxx_compile_flags = ["-fno-rtti"],
         extra_ar_flags = ["-x"],
         extra_include_paths = "",
+        features = [],
         legacy_cc_toolchain = False):
     """Produces a test cargo_build_script target that's set up to use a custom cc_toolchain with the extra_cc_compile_flags.
 
@@ -337,6 +346,7 @@ def cargo_build_script_with_extra_cc_compile_flags(
       extra_cxx_compile_flags: Extra C++-specific args for the cc_toolchain.
       extra_ar_flags: Extra archiver args for the cc_toolchain.
       extra_include_paths: INCLUDE environment variable value for the cc_toolchain.
+      features: Features enabled on the build script.
       legacy_cc_toolchain: Enables legacy tool_path configuration of the cc
         cc toolchain.
     """
@@ -371,6 +381,7 @@ def cargo_build_script_with_extra_cc_compile_flags(
         name = "%s/cargo_build_script_impl" % name,
         edition = "2018",
         srcs = ["build.rs"],
+        features = features,
         tags = ["manual", "nobuild"],
     )
     with_extra_toolchains(
@@ -378,6 +389,39 @@ def cargo_build_script_with_extra_cc_compile_flags(
         extra_toolchains = ["//%s:%s/test_cc_toolchain" % (native.package_name(), name)],
         target = "%s/cargo_build_script_impl" % name,
         tags = ["manual"],
+    )
+
+def json_vfs_forwarding_test(name):
+    cargo_build_script_with_extra_cc_compile_flags(
+        name = "%s/cargo_build_script" % name,
+        extra_cc_compile_flags = [
+            "-Xpreprocessor",
+            "-ivfsoverlay",
+            "-Xpreprocessor",
+            "external/sdk/overlay.json",
+            "-Xclang",
+            "-ivfsoverlay",
+            "-Xclang",
+            "external/sdk/overlay.json",
+            "-vfsoverlay=external/sdk/overlay.json",
+            "/clang:-ivfsoverlay",
+            "/clang:external/sdk/overlay.json",
+        ],
+        features = ["cargo-rebase-json-vfs-overlays"],
+    )
+    cc_args_and_env_analysis_test(
+        name = name,
+        target_under_test = "%s/cargo_build_script" % name,
+        expected_cflags = [
+            "-Xpreprocessor",
+            "-ivfsoverlay",
+            "${vfs_overlay}",
+            "-Xclang",
+            "-vfsoverlay=${vfs_overlay}",
+            "/clang:-ivfsoverlay",
+            "/clang:${vfs_overlay}",
+        ],
+        expected_vfs_source = "external/sdk/overlay.json",
     )
 
 def libtool_fallback_test(name):
