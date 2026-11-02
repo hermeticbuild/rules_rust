@@ -224,8 +224,8 @@ def _cc_args_and_env_analysis_test_impl(ctx):
 
     overlay_path = ""
     if ctx.attr.expected_vfs_source:
-        out_dir = [output for output in cargo_action.outputs.to_list() if output.path.endswith(".out_dir")][0]
-        overlay_path = out_dir.path + "/.rules_rust_vfs_0.json"
+        runfiles_dir = [output for output in cargo_action.outputs.to_list() if output.path.endswith(".crf")][0]
+        overlay_path = runfiles_dir.path + "/.rules_rust_vfs_0.json"
         asserts.equals(env, {ctx.attr.expected_vfs_source: overlay_path}, json.decode(cargo_action.env["RULES_RUST_JSON_VFS_OVERLAYS"]))
 
     for env_var, expected_path in _EXPECTED_CC_TOOLCHAIN_TOOLS.items():

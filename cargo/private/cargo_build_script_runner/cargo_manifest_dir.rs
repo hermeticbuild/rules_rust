@@ -117,6 +117,11 @@ pub struct RunfilesMaker {
 }
 
 impl RunfilesMaker {
+    /// Runner-owned storage, including files outside the crate manifest directory.
+    pub fn output_dir(&self) -> &Path {
+        &self.output_dir
+    }
+
     pub fn from_param_file(arg: &str) -> RunfilesMaker {
         assert!(
             arg.starts_with('@'),

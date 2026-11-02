@@ -118,12 +118,12 @@ pub fn rebase_json(source: &str, original: &Path, exec_root: &Path) -> Result<St
     document.stringify().map_err(|error| error.to_string())
 }
 
-/// Files owned exclusively by this invocation; remove before capturing OUT_DIR.
+/// Files owned exclusively by this invocation; remove before capturing outputs.
 #[derive(Default)]
 pub struct PreparedOverlays(Vec<PathBuf>);
 
 impl PreparedOverlays {
-    pub fn from_env(exec_root: &Path, out_dir: &Path) -> Result<Self, String> {
+    pub fn from_env(exec_root: &Path, runfiles_dir: &Path) -> Result<Self, String> {
         let mut prepared = Self::default();
         let Some(mapping) = env::var_os("RULES_RUST_JSON_VFS_OVERLAYS") else {
             return Ok(prepared);
@@ -131,12 +131,15 @@ impl PreparedOverlays {
         let mapping: JsonValue = mapping.to_str().ok_or("VFS mapping is not UTF-8")?
             .parse().map_err(|error| format!("invalid VFS mapping: {error}"))?;
         let mapping = mapping.get::<HashMap<String, JsonValue>>().ok_or("expected VFS mapping object")?;
+        // Sparse runfiles may not have created their output directory yet.
+        fs::create_dir_all(runfiles_dir)
+            .map_err(|error| format!("{}: {error}", runfiles_dir.display()))?;
         for (source, destination) in mapping {
             let source = exec_root.join(source);
             let destination = exec_root.join(destination.get::<String>().ok_or("expected VFS output path")?);
-            if destination.parent() != Some(out_dir)
+            if destination.parent() != Some(runfiles_dir)
                 || !destination.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with(".rules_rust_vfs_")) {
-                return Err("VFS copy must be a runner-owned file directly inside OUT_DIR".into());
+                return Err("VFS copy must be a runner-owned file directly inside the runfiles directory".into());
             }
             let contents = fs::read_to_string(&source).map_err(|error| format!("{}: {error}", source.display()))?;
             let contents = rebase_json(&contents, &source, exec_root)
@@ -236,6 +239,55 @@ mod tests {
         for (value, expected) in [(0.0, false), (1.0, true)] {
             assert_eq!(boolean(Some(&JsonValue::Number(value)), false), Ok(expected));
         }
+    }
+
+    #[test]
+    fn prepared_overlays_survive_out_dir_reset_and_are_removed() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let exec_root =
+            env::temp_dir().join(format!("rules_rust_vfs_{}_{}", std::process::id(), unique));
+        let out_dir = exec_root.join("script.out_dir");
+        let runfiles_dir = exec_root.join("script.crf");
+        fs::create_dir_all(&out_dir).unwrap();
+        fs::write(exec_root.join("header.h"), "preserved header").unwrap();
+        fs::write(
+            exec_root.join("overlay.json"),
+            r#"{"version":0,"roots":[
+            {"type":"file","name":"virtual.h","external-contents":"header.h"}]}"#,
+        )
+        .unwrap();
+        env::set_var(
+            "RULES_RUST_JSON_VFS_OVERLAYS",
+            r#"{"overlay.json":"script.crf/.rules_rust_vfs_0.json"}"#,
+        );
+        let prepared = PreparedOverlays::from_env(&exec_root, &runfiles_dir).unwrap();
+        // An existing file cannot be replaced or adopted for cleanup.
+        assert!(PreparedOverlays::from_env(&exec_root, &runfiles_dir).is_err());
+        env::set_var(
+            "RULES_RUST_JSON_VFS_OVERLAYS",
+            r#"{"overlay.json":"script.crf/m/.rules_rust_vfs_0.json"}"#,
+        );
+        assert!(PreparedOverlays::from_env(&exec_root, &runfiles_dir).is_err());
+        env::remove_var("RULES_RUST_JSON_VFS_OVERLAYS");
+        let overlay = prepared.0[0].clone();
+
+        // A build script may replace OUT_DIR before invoking its compiler.
+        fs::remove_dir_all(&out_dir).unwrap();
+        fs::create_dir_all(&out_dir).unwrap();
+        let value: JsonValue = fs::read_to_string(&overlay).unwrap().parse().unwrap();
+        let external = value["roots"][0]["external-contents"]
+            .get::<String>()
+            .unwrap();
+        assert_eq!(fs::read_to_string(external).unwrap(), "preserved header");
+        assert_eq!(overlay.parent(), Some(runfiles_dir.as_path()));
+        prepared.remove().unwrap();
+        assert!(!overlay.exists());
+        assert_eq!(fs::read_dir(&out_dir).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&runfiles_dir).unwrap().count(), 0);
+        fs::remove_dir_all(exec_root).unwrap();
     }
 
     #[test]

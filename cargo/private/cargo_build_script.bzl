@@ -305,7 +305,7 @@ _PWD_FLAG_PASSES = [
     _pwd_flags_direct_libs,
 ]
 
-def _rebase_json_vfs_flags(args, overlays, out_dir):
+def _rebase_json_vfs_flags(args, overlays, runfiles_dir):
     """Copy JSON overlays at execution time before changing the working directory."""
     result = []
     expect_path = False
@@ -327,14 +327,14 @@ def _rebase_json_vfs_flags(args, overlays, out_dir):
         if prefix != None:
             source = arg[len(prefix):]
             if source not in overlays:
-                overlays[source] = "${{pwd}}/{}/.rules_rust_vfs_{}.json".format(out_dir, len(overlays))
+                overlays[source] = "${{pwd}}/{}/.rules_rust_vfs_{}.json".format(runfiles_dir, len(overlays))
             result.append(prefix + overlays[source])
             expect_path = False
         else:
             result.append(arg)
     return result
 
-def _pwd_flags(args, overlays = None, out_dir = None):
+def _pwd_flags(args, overlays = None, runfiles_dir = None):
     clang_cl_prefix = "/clang:"
     clang_cl_wrapped = [arg.startswith(clang_cl_prefix) for arg in args]
     args = [arg[len(clang_cl_prefix):] if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
@@ -343,7 +343,7 @@ def _pwd_flags(args, overlays = None, out_dir = None):
         args = pwd_flags_pass(args)
 
     if overlays != None:
-        args = _rebase_json_vfs_flags(args, overlays, out_dir)
+        args = _rebase_json_vfs_flags(args, overlays, runfiles_dir)
 
     return [clang_cl_prefix + arg if clang_cl_wrapped[i] else arg for i, arg in enumerate(args)]
 
@@ -589,7 +589,7 @@ def _cargo_build_script_impl(ctx):
     linker, _, link_args, linker_env = get_linker_and_args(ctx, "bin", toolchain, cc_toolchain, feature_configuration, None)
     env.update(**linker_env)
     env["LD"] = linker
-    env["LDFLAGS"] = " ".join(_pwd_flags(link_args, vfs_overlays, out_dir.path))
+    env["LDFLAGS"] = " ".join(_pwd_flags(link_args, vfs_overlays, runfiles_dir.path))
 
     # Defaults for cxx flags.
     env["ARFLAGS"] = ""
@@ -643,8 +643,8 @@ def _cargo_build_script_impl(ctx):
             prefix_map_args = ["-ffile-prefix-map=${pwd}=.", "-fdebug-prefix-map=${pwd}=."]
             cc_c_args = cc_c_args + prefix_map_args
             cc_cxx_args = cc_cxx_args + prefix_map_args
-        env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args, vfs_overlays, out_dir.path))
-        env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args, vfs_overlays, out_dir.path))
+        env["CFLAGS"] = " ".join(_pwd_flags(cc_c_args, vfs_overlays, runfiles_dir.path))
+        env["CXXFLAGS"] = " ".join(_pwd_flags(cc_cxx_args, vfs_overlays, runfiles_dir.path))
         # It may be tempting to forward ARFLAGS, but cc-rs is opinionated enough
         # that doing so is more likely to hurt than help. If you need to change
         # ARFLAGS, make changes to cc-rs.

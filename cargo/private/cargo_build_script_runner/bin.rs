@@ -181,7 +181,10 @@ fn run_buildrs() -> Result<(), String> {
         );
     }
 
-    let overlays = cargo_build_script_runner::vfs_overlay::PreparedOverlays::from_env(&exec_root, &out_dir_abs)?;
+    let overlays = cargo_build_script_runner::vfs_overlay::PreparedOverlays::from_env(
+        &exec_root,
+        &exec_root.join(cargo_manifest_maker.output_dir()),
+    )?;
     let emit_warnings = env::var_os(SUPPRESS_WARNINGS_ENV).is_none_or(|v| v != "1");
 
     let result = BuildScriptOutput::outputs_from_command(&mut command, emit_warnings);
