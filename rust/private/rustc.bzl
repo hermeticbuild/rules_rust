@@ -494,6 +494,41 @@ def _get_linker_env(linker_config):
         variables = linker_config.variables,
     )
 
+def _msvc_linker_args_from_cc(link_args):
+    """Accommodate clang-cl forwarding when Rust selects a direct MSVC linker.
+
+    This only decodes -Xlinker/-Wl, (including /clang:) and preserves native
+    LIBPATH flags. It does not reproduce compiler-driver runtime selection or expand
+    -resource-dir: https://github.com/hermeticbuild/hermetic-llvm/issues/910.
+    """
+    driver_args = []
+    clang_args = []
+    linker_operand = False
+    for arg in link_args:
+        if not linker_operand and arg.startswith("/clang:"):
+            clang_args.append(arg.removeprefix("/clang:"))
+        else:
+            driver_args.append(arg)
+            linker_operand = not linker_operand and arg == "-Xlinker"
+
+    # Clang parses /clang: arguments separately and appends them after the
+    # original arguments. Do not pair an -Xlinker across these two streams.
+    result = []
+    for stream in [driver_args, clang_args]:
+        skip_next = False
+        for i, arg in enumerate(stream):
+            if skip_next:
+                skip_next = False
+            elif arg == "-Xlinker" and i + 1 < len(stream):
+                result.append(stream[i + 1])
+                skip_next = True
+            elif arg.startswith("-Wl,"):
+                result.extend(arg[4:].split(","))
+            elif arg.upper().startswith(("-LIBPATH:", "/LIBPATH:")):
+                # Already-native flags, including those from direct C++ linkers.
+                result.append(arg)
+    return result
+
 def _get_linker_args(linker_config):
     link_args = []
     if linker_config.variables != None:
@@ -515,26 +550,14 @@ def _get_linker_args(linker_config):
         if linker_config.target_arch in ("bpfeb", "bpfel"):
             # BPF linkers consume Rust bitcode and do not accept C toolchain arguments.
             link_args = []
+        elif linker_config.is_direct_driver and linker_config.target_os == "windows" and linker_config.target_abi == "msvc":
+            link_args = _msvc_linker_args_from_cc(link_args)
         elif linker_config.variables != None and link_args:
             filtered_args = []
             skip_next = False
-            direct_msvc = linker_config.is_direct_driver and linker_config.target_os == "windows" and linker_config.target_abi == "msvc"
-            if direct_msvc:
-                # clang-cl's /clang: forwards to the clang driver, not to lld.
-                # Unwrap it before decoding the driver's explicit linker args.
-                link_args = [arg.removeprefix("/clang:") for arg in link_args]
             for i, arg in enumerate(link_args):
                 if skip_next:
                     skip_next = False
-                    continue
-
-                if direct_msvc and arg == "-Xlinker" and i + 1 < len(link_args):
-                    filtered_args.append(link_args[i + 1])
-                    skip_next = True
-                    continue
-
-                if direct_msvc and arg.startswith("-Wl,"):
-                    filtered_args.extend(arg[4:].split(","))
                     continue
 
                 # Strip -Wl, prefix if using direct driver (it's only for compiler drivers)
@@ -551,20 +574,11 @@ def _get_linker_args(linker_config):
                     filtered_args.append(version)
                     # Keep library search path flags
 
-                elif direct_msvc and processed_arg == "-L" and i + 1 < len(link_args):
-                    skip_next = True
-
                 elif processed_arg.startswith("-L"):
-                    if direct_msvc:
-                        continue
                     filtered_args.append(processed_arg)
                     # Keep sysroot flags (as single or two-part arguments)
 
                 elif processed_arg == "--sysroot" or processed_arg.startswith("--sysroot="):
-                    if direct_msvc:
-                        if processed_arg == "--sysroot" and i + 1 < len(link_args):
-                            skip_next = True
-                        continue
                     filtered_args.append(processed_arg)
                     if processed_arg == "--sysroot" and i + 1 < len(link_args):
                         # Two-part argument, keep the next arg too
@@ -3398,10 +3412,8 @@ def portable_link_flags(
         use_pic,
         ambiguous_libs,
         get_lib_name,
-        for_windows = False,
         for_darwin = False,
-        flavor_msvc = False,
-        use_direct_driver = False):
+        flavor_msvc = False):
     """_summary_
 
     Args:
@@ -3409,10 +3421,8 @@ def portable_link_flags(
         use_pic (_type_): _description_
         ambiguous_libs (_type_): _description_
         get_lib_name (_type_): _description_
-        for_windows (bool, optional): _description_. Defaults to False.
         for_darwin (bool, optional): _description_. Defaults to False.
         flavor_msvc (bool, optional): _description_. Defaults to False.
-        use_direct_driver (bool, optional): _description_. Defaults to False.
 
     Returns:
         _type_: _description_
@@ -3455,11 +3465,6 @@ def portable_link_flags(
             artifact.basename.startswith("test-") or artifact.basename.startswith("std-")
         ):
             return [] if for_darwin else ["-lstatic=%s" % get_lib_name(artifact)]
-
-        if for_windows and flavor_msvc and use_direct_driver and not artifact.basename.endswith(".lib"):
-            return [
-                "-Clink-arg={}".format(artifact.path),
-            ]
 
         if flavor_msvc:
             return [
@@ -3509,7 +3514,7 @@ def _make_link_flags_windows(make_link_flags_args, flavor_msvc, use_direct_drive
                 ])
         elif include_link_flags:
             get_lib_name = get_lib_name_for_windows if flavor_msvc else get_lib_name_default
-            ret.extend(portable_link_flags(lib, use_pic, ambiguous_libs, get_lib_name, for_windows = True, flavor_msvc = flavor_msvc, use_direct_driver = use_direct_driver))
+            ret.extend(portable_link_flags(lib, use_pic, ambiguous_libs, get_lib_name, flavor_msvc = flavor_msvc))
 
     # Windows toolchains can inherit POSIX defaults like -pthread from C deps,
     # which fails to link with the MinGW/LLD toolchain. Drop them here.
@@ -3656,11 +3661,6 @@ def _add_native_link_flags(
     if crate_type in ["lib", "rlib"]:
         return
 
-    # A staticlib bundles native libraries through rustc's -l metadata; it does
-    # not run the final linker or consume path-only -Clink-arg entries.
-    if crate_type == "staticlib" and toolchain.target_os == "windows" and toolchain.target_abi == "msvc":
-        use_direct_link_driver = False
-
     use_pic = should_use_pic(
         cc_toolchain = cc_toolchain,
         feature_configuration = feature_configuration,
@@ -3745,7 +3745,10 @@ def _add_native_link_flags(
                 format_each = "-Lnative=%s",
             )
             if include_link_flags:
-                if toolchain.target_os == "windows" and toolchain.target_abi == "msvc" and use_direct_link_driver:
+                if toolchain.target_os == "windows" and toolchain.target_abi == "msvc" and use_direct_link_driver and crate_type != "staticlib":
+                    # Runtime libraries bypass _disambiguate_libs, so non-.lib
+                    # archives need their exact path. A staticlib instead bundles
+                    # libraries via -l metadata and does not run a final linker.
                     # Resolve File.path during Args expansion to preserve path mapping.
                     args.add_all(
                         runtime_libs,

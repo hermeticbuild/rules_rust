@@ -49,6 +49,8 @@ def _cc_toolchain_config_impl(ctx):
                     actions = [ACTION_NAMES.cpp_link_executable],
                     flag_groups = [flag_group(flags = [
                         "/clang:-Xlinker",
+                        "-Xlinker",
+                        "/LIBPATH:unwrapped/lib",
                         "/clang:/LIBPATH:sdk/lib",
                         "/clang:-Xlinker",
                         "/clang:/MACHINE:X64",
@@ -56,10 +58,15 @@ def _cc_toolchain_config_impl(ctx):
                         "/clang:/vfsoverlay:sdk.json",
                         "/clang:-Xlinker",
                         "/clang:/lldignoreenv",
+                        "/clang:-Wl,/DEBUG:NONE,/OPT:REF",
+                        "-LIBPATH:native/lib",
                         "-fuse-ld=lld",
                         "-L",
                         "driver-only",
                         "--sysroot=driver-only",
+                        "-resource-dir=driver-only",
+                        "-rtlib=compiler-rt",
+                        "/MT",
                     ])],
                 )],
             )],
@@ -159,7 +166,19 @@ def _direct_msvc_linker_args_test_impl(ctx):
         if preference == "rust":
             asserts.equals(env, "rust-lld", path)
             asserts.true(env, direct)
-            asserts.equals(env, ["/LIBPATH:sdk/lib", "/MACHINE:X64", "/vfsoverlay:sdk.json", "/lldignoreenv"], args)
+
+            # /clang: arguments are parsed separately, then appended by Clang.
+            # Native linker flags must survive too, for direct C++ toolchains.
+            asserts.equals(env, [
+                "/LIBPATH:unwrapped/lib",
+                "-LIBPATH:native/lib",
+                "/LIBPATH:sdk/lib",
+                "/MACHINE:X64",
+                "/vfsoverlay:sdk.json",
+                "/lldignoreenv",
+                "/DEBUG:NONE",
+                "/OPT:REF",
+            ], args)
         else:
             # Merely configuring a Rust linker must not change the default.
             asserts.equals(env, linker, path)
