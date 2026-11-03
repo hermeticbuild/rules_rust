@@ -414,7 +414,9 @@ _LinkerConfigInfo = provider(fields = [
     "is_direct_driver",
     "rpaths",
     "rust_linker",
+    "target_abi",
     "target_arch",
+    "target_os",
     "variables",
 ])
 
@@ -469,7 +471,9 @@ def _get_linker_config(ctx, crate_type, toolchain, cc_toolchain, feature_configu
         variables = link_variables,
         rust_linker = toolchain.linker if use_rust_linker else None,
         is_direct_driver = use_rust_linker and toolchain.linker_type == "direct",
+        target_abi = toolchain.target_abi,
         target_arch = toolchain.target_arch,
+        target_os = toolchain.target_os,
         rpaths = rpaths,
     )
 
@@ -489,6 +493,41 @@ def _get_linker_env(linker_config):
         action_name = linker_config.action_name,
         variables = linker_config.variables,
     )
+
+def _msvc_linker_args_from_cc(link_args):
+    """Accommodate clang-cl forwarding when Rust selects a direct MSVC linker.
+
+    This only decodes -Xlinker/-Wl, (including /clang:) and preserves native
+    LIBPATH flags. It does not reproduce compiler-driver runtime selection or expand
+    -resource-dir: https://github.com/hermeticbuild/hermetic-llvm/issues/910.
+    """
+    driver_args = []
+    clang_args = []
+    linker_operand = False
+    for arg in link_args:
+        if not linker_operand and arg.startswith("/clang:"):
+            clang_args.append(arg.removeprefix("/clang:"))
+        else:
+            driver_args.append(arg)
+            linker_operand = not linker_operand and arg == "-Xlinker"
+
+    # Clang parses /clang: arguments separately and appends them after the
+    # original arguments. Do not pair an -Xlinker across these two streams.
+    result = []
+    for stream in [driver_args, clang_args]:
+        skip_next = False
+        for i, arg in enumerate(stream):
+            if skip_next:
+                skip_next = False
+            elif arg == "-Xlinker" and i + 1 < len(stream):
+                result.append(stream[i + 1])
+                skip_next = True
+            elif arg.startswith("-Wl,"):
+                result.extend(arg[4:].split(","))
+            elif arg.upper().startswith(("-LIBPATH:", "/LIBPATH:")):
+                # Already-native flags, including those from direct C++ linkers.
+                result.append(arg)
+    return result
 
 def _get_linker_args(linker_config):
     link_args = []
@@ -511,6 +550,8 @@ def _get_linker_args(linker_config):
         if linker_config.target_arch in ("bpfeb", "bpfel"):
             # BPF linkers consume Rust bitcode and do not accept C toolchain arguments.
             link_args = []
+        elif linker_config.is_direct_driver and linker_config.target_os == "windows" and linker_config.target_abi == "msvc":
+            link_args = _msvc_linker_args_from_cc(link_args)
         elif linker_config.variables != None and link_args:
             filtered_args = []
             skip_next = False
