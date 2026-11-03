@@ -3745,22 +3745,11 @@ def _add_native_link_flags(
                 format_each = "-Lnative=%s",
             )
             if include_link_flags:
-                if toolchain.target_os == "windows" and toolchain.target_abi == "msvc" and use_direct_link_driver and crate_type != "staticlib":
-                    # Runtime libraries bypass _disambiguate_libs, so non-.lib
-                    # archives need their exact path. A staticlib instead bundles
-                    # libraries via -l metadata and does not run a final linker.
-                    # Resolve File.path during Args expansion to preserve path mapping.
-                    args.add_all(
-                        runtime_libs,
-                        map_each = lambda runtime_lib: static_runtime_link_format % get_lib_name(runtime_lib) if runtime_lib.basename.endswith(".lib") else "--codegen=link-arg=%s" % runtime_lib.path,
-                        allow_closure = True,
-                    )
-                else:
-                    args.add_all(
-                        runtime_libs,
-                        map_each = get_lib_name,
-                        format_each = static_runtime_link_format,
-                    )
+                args.add_all(
+                    runtime_libs,
+                    map_each = get_lib_name,
+                    format_each = static_runtime_link_format,
+                )
 
 def _get_out_dir_path(file):
     """Return the path suitable for `--out-dir=<value>`.

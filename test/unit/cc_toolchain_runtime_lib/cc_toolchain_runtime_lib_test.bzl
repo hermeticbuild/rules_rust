@@ -7,8 +7,7 @@ load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "feature")
 load("@rules_cc//cc:defs.bzl", "cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/toolchains:cc_toolchain_config_info.bzl", "CcToolchainConfigInfo")
-load("//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", "rust_shared_library", "rust_static_library")
-load("//rust:toolchain.bzl", "rust_stdlib_filegroup", "rust_toolchain")
+load("//rust:defs.bzl", "rust_doc_test", "rust_library", "rust_shared_library", "rust_static_library")
 
 def _test_cc_config_impl(ctx):
     config_info = cc_common.create_cc_toolchain_config_info(
@@ -33,10 +32,7 @@ test_cc_config = rule(
 )
 
 def _with_extra_toolchain_transition_impl(_settings, attr):
-    toolchains = [attr.extra_toolchain]
-    if attr.extra_rust_toolchain:
-        toolchains.append(attr.extra_rust_toolchain)
-    return {"//command_line_option:extra_toolchains": toolchains}
+    return {"//command_line_option:extra_toolchains": [attr.extra_toolchain]}
 
 with_extra_toolchain_transition = transition(
     implementation = _with_extra_toolchain_transition_impl,
@@ -64,7 +60,6 @@ with_extra_toolchain = rule(
     implementation = _with_extra_toolchain_impl,
     attrs = {
         "extra_toolchain": attr.label(),
-        "extra_rust_toolchain": attr.label(),
         "target": attr.label(cfg = with_extra_toolchain_transition),
     },
 )
@@ -203,58 +198,6 @@ def runtime_libs_test(name):
         toolchain = ":%s/test_cc_toolchain_impl" % name,
         toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
     )
-
-    # Analysis-only MSVC toolchain: no Windows compiler or SDK is needed to
-    # inspect the real Rustc action's handling of cc_toolchain runtime archives.
-    rust_stdlib_filegroup(
-        name = name + "/msvc_std",
-        srcs = ["empty"],
-    )
-    rust_toolchain(
-        name = name + "/msvc_toolchain_impl",
-        binary_ext = ".exe",
-        default_edition = "2021",
-        dylib_ext = ".dll",
-        exec_triple = "x86_64-unknown-none",
-        linker = "empty",
-        linker_preference = "rust",
-        linker_type = "direct",
-        process_wrapper = "empty",
-        rust_doc = "empty",
-        rust_std = name + "/msvc_std",
-        rustc = "empty",
-        staticlib_ext = ".lib",
-        stdlib_linkflags = [],
-        target_triple = "x86_64-pc-windows-msvc",
-    )
-    native.toolchain(
-        name = name + "/msvc_toolchain",
-        toolchain = name + "/msvc_toolchain_impl",
-        toolchain_type = "//rust:toolchain_type",
-    )
-    for kind, rust_rule in [("binary", rust_binary), ("staticlib", rust_static_library)]:
-        subject = name + "/msvc_" + kind
-        rust_rule(
-            name = subject,
-            srcs = ["lib.rs"],
-            tags = ["manual", "nobuild"],
-            **({"experimental_use_cc_common_link": 0} if kind == "binary" else {})
-        )
-        with_extra_toolchain(
-            name = subject + "_subject",
-            extra_toolchain = name + "/test_cc_toolchain",
-            extra_rust_toolchain = name + "/msvc_toolchain",
-            target = subject,
-            tags = ["manual"],
-        )
-        runtime_arg = "--codegen=link-arg=" + native.package_name() + "/dummy.a"
-        inputs_analysis_test(
-            name = subject + "_test",
-            target_under_test = subject + "_subject",
-            expected_inputs = ["dummy.a"],
-            expected_args = [runtime_arg] if kind == "binary" else ["-lstatic=dummy"],
-            unexpected_args = ["-lstatic=dummy"] if kind == "binary" else [runtime_arg],
-        )
 
     rust_shared_library(
         name = "%s/__shared_library" % name,
