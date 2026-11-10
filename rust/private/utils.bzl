@@ -879,6 +879,13 @@ def determine_lib_name(name, crate_type, toolchain, lib_hash = None):
     prefix = ""
     if crate_type in ("dylib", "cdylib", "proc-macro"):
         extension = toolchain.dylib_ext
+
+        # Proc macros are only ever built for the exec platform (via
+        # `proc_macro_deps`), but the copy in `deps` is still analyzed in the
+        # target configuration. Targets without dynamic linking (e.g. UEFI)
+        # have no dylib extension, so use a placeholder there.
+        if not extension and crate_type == "proc-macro":
+            extension = ".so"
     elif crate_type == "staticlib":
         extension = toolchain.staticlib_ext
     elif crate_type in ("lib", "rlib"):
