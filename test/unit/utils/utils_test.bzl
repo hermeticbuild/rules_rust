@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 
 # buildifier: disable=bzl-visibility
-load("//rust/private:utils.bzl", "decode_crate_name_as_label_for_testing", "determine_lib_name", "encode_label_as_crate_name", "encode_raw_string_for_testing", "should_encode_label_in_crate_name", "substitutions_for_testing")
+load("//rust/private:utils.bzl", "decode_crate_name_as_label_for_testing", "determine_lib_name", "determine_output_hash", "encode_label_as_crate_name", "encode_raw_string_for_testing", "should_encode_label_in_crate_name", "substitutions_for_testing")
 
 def _encode_label_as_crate_name_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -139,6 +139,25 @@ def _proc_macro_without_dylib_test_impl(ctx):
 
 _proc_macro_without_dylib_test = unittest.make(_proc_macro_without_dylib_test_impl)
 
+def _configuration_independent_output_hash_test_impl(ctx):
+    env = unittest.begin(ctx)
+    label = Label("//test:crate")
+    def_root = "bazel-out/k8-fastbuild-ST-first/bin"
+    other_root = "bazel-out/k8-fastbuild-ST-second/bin"
+    first = struct(path = def_root + "/pkg/lib.rs", root = struct(path = def_root))
+    second = struct(path = other_root + "/pkg/lib.rs", root = struct(path = other_root))
+    asserts.equals(env, determine_output_hash(first, label), determine_output_hash(second, label))
+
+    # Keep distinct labels and relative paths distinct after normalization.
+    different = struct(path = other_root + "/other/lib.rs", root = struct(path = other_root))
+    asserts.true(env, determine_output_hash(first, label) != determine_output_hash(different, label))
+    asserts.true(env, determine_output_hash(first, label) != determine_output_hash(first, Label("//test:other")))
+    source = struct(path = "pkg/lib.rs", root = struct(path = ""))
+    asserts.equals(env, repr(abs(hash(source.path) + hash(repr(label)))), determine_output_hash(source, label))
+    return unittest.end(env)
+
+_configuration_independent_output_hash_test = unittest.make(_configuration_independent_output_hash_test_impl)
+
 def utils_test_suite(name):
     unittest.suite(
         name,
@@ -148,4 +167,5 @@ def utils_test_suite(name):
         encode_raw_string_test,
         decode_test,
         _proc_macro_without_dylib_test,
+        _configuration_independent_output_hash_test,
     )

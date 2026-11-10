@@ -221,8 +221,13 @@ def determine_output_hash(crate_root, label):
         str: A string representation of the hash.
     """
 
+    # Generated roots include a configuration-dependent output directory. Use
+    # the path relative to the artifact root so unrelated configuration changes
+    # do not change crate identity. Source files keep their existing path.
+    crate_root_path = crate_root.path.removeprefix(crate_root.root.path + "/")
+
     # Take the absolute value of hash() since it could be negative.
-    h = abs(hash(crate_root.path) + hash(repr(label)))
+    h = abs(hash(crate_root_path) + hash(repr(label)))
     return repr(h)
 
 def get_preferred_artifact(library_to_link, use_pic):
