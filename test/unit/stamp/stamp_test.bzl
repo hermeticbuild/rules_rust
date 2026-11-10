@@ -1,6 +1,6 @@
 """Unittest to verify workspace status stamping is applied to environment files"""
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//rust:defs.bzl", "rust_binary", "rust_common", "rust_library", "rust_test")
 load(
     "//test/unit:common.bzl",
@@ -26,11 +26,21 @@ def _assert_not_stamped(env, action):
     assert_argv_contains_not(env, action, "--stable-status-file")
     assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
 
+def _assert_automatically_stamped(env, target, action):
+    _assert_not_stamped(env, action)
+    assert_argv_contains(env, action, "--resolved-env-file")
+    resolvers = [a for a in target.actions if a.mnemonic == "RustStampEnv"]
+    asserts.equals(env, 1, len(resolvers))
+    _assert_stamped(env, resolvers[0])
+    status_paths = ["bazel-out/stable-status.txt", "bazel-out/volatile-status.txt"]
+    for file in action.inputs.to_list():
+        asserts.false(env, file.path in status_paths, "rustc must not directly depend on status files")
+
 def _stamp_build_flag_test_impl(ctx, flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     is_test = target[rust_common.crate_info].is_test
@@ -40,7 +50,7 @@ def _stamp_build_flag_test_impl(ctx, flag_value):
     # libraries and tests.
     if flag_value:
         if is_bin and not is_test:
-            _assert_stamped(env, action)
+            _assert_automatically_stamped(env, target, action)
         else:
             _assert_not_stamped(env, action)
     else:
@@ -132,7 +142,7 @@ def _attribute_stamp_test_impl(ctx, attribute_value, build_flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     if attribute_value == 1:
@@ -140,7 +150,7 @@ def _attribute_stamp_test_impl(ctx, attribute_value, build_flag_value):
     elif attribute_value == 0:
         _assert_not_stamped(env, action)
     elif build_flag_value:
-        _assert_stamped(env, action)
+        _assert_automatically_stamped(env, target, action)
     else:
         _assert_not_stamped(env, action)
 
@@ -281,7 +291,7 @@ def _process_wrapper_with_stamp_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     _assert_not_stamped(env, action)

@@ -2183,6 +2183,10 @@ def rustc_compile(
     # Determine if the build is currently running with --stamp
     stamp = is_stamping_enabled(attr)
 
+    # Explicit stamp=1 retains its unconditional status-file dependency. For
+    # automatic stamping, only the resolved environment should invalidate rustc.
+    automatic_stamp = stamp and getattr(attr, "stamp", -1) == -1
+
     # Add flags for any 'rustc' lints that are specified.
     lint_files = []
     if hasattr(attr, "lint_config") and attr.lint_config:
@@ -2204,7 +2208,7 @@ def rustc_compile(
         dep_info = dep_info,
         build_info = build_info,
         lint_files = lint_files,
-        stamp = stamp,
+        stamp = stamp and not automatic_stamp,
         experimental_use_cc_common_link = use_cc_common_link,
         runtime_libs = runtime_libs,
     )
@@ -2314,7 +2318,7 @@ def rustc_compile(
         build_flags_files = build_flags_files,
         bin_link_flags = getattr(build_info, "bin_link_flags", None) if build_info and crate_info.type == "bin" and not crate_info.is_test else None,
         force_all_deps_direct = force_all_deps_direct,
-        stamp = stamp,
+        stamp = stamp and not automatic_stamp,
         use_json_output = bool(build_metadata) or bool(rustc_output) or bool(rustc_rmeta_output),
         skip_expanding_rustc_env = skip_expanding_rustc_env,
         require_explicit_unstable_features = require_explicit_unstable_features,
@@ -2350,7 +2354,7 @@ def rustc_compile(
             build_env_files = build_env_files,
             build_flags_files = build_flags_files,
             force_all_deps_direct = force_all_deps_direct,
-            stamp = stamp,
+            stamp = stamp and not automatic_stamp,
             use_json_output = True,
             build_metadata = True,
             skip_expanding_rustc_env = skip_expanding_rustc_env,
@@ -2376,6 +2380,30 @@ def rustc_compile(
         # hatch).
         env["RUSTC_BOOTSTRAP"] = "1"
     env.update(extra_env)
+
+    if automatic_stamp:
+        resolved_env = ctx.actions.declare_file(crate_info.output.basename + ".stamped-env.json", sibling = crate_info.output)
+        stamp_args = ctx.actions.args()
+        stamp_args.add("--resolve-stamp-env")
+        stamp_args.add("--output", resolved_env)
+        stamp_args.add("--stable-status-file", ctx.info_file)
+        stamp_args.add("--volatile-status-file", ctx.version_file)
+        stamp_args.add_all(["{}={}".format(key, env[key]) for key in sorted(env.keys())], before_each = "--env")
+        stamp_args.add_all(build_env_files, before_each = "--env-file")
+        ctx.actions.run(
+            executable = rust_toolchain.process_wrapper,
+            inputs = build_env_files + [ctx.info_file, ctx.version_file],
+            outputs = [resolved_env],
+            arguments = [stamp_args],
+            mnemonic = "RustStampEnv",
+            progress_message = "Resolving Rust stamp environment %{label}",
+            toolchain = toolchain,
+        )
+        args.process_wrapper_flags.add("--resolved-env-file", resolved_env)
+        compile_inputs = depset([resolved_env], transitive = [compile_inputs])
+        if args_metadata:
+            args_metadata.process_wrapper_flags.add("--resolved-env-file", resolved_env)
+            compile_inputs_metadata = depset([resolved_env], transitive = [compile_inputs_metadata])
 
     if hasattr(attr, "version") and attr.version != "0.0.0":
         formatted_version = " v{}".format(attr.version)

@@ -690,7 +690,10 @@ def _stamp_attribute(default_value):
             - `stamp = 0`: Always replace build information by constant values. This gives good build result caching.
 
             - `stamp = -1`: Embedding of build information is controlled by the \
-            [--[no]stamp](https://docs.bazel.build/versions/main/user-manual.html#flag--stamp) flag.
+            [--[no]stamp](https://docs.bazel.build/versions/main/user-manual.html#flag--stamp) flag. \
+            When enabled, Rust compilation resolves workspace-status placeholders in `rustc_env` and \
+            `rustc_env_files` in a separate action. Changes to status values that do not change the resolved \
+            environment do not invalidate compilation or metadata actions.
 
             Stamped targets are not rebuilt unless their dependencies change.
 

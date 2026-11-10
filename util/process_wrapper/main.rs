@@ -16,6 +16,7 @@ mod flags;
 mod options;
 mod output;
 mod rustc;
+mod stamp_env;
 mod util;
 
 use std::collections::HashMap;
@@ -381,6 +382,9 @@ fn check_output_for_working_dir(
 }
 
 fn main() -> Result<(), ProcessWrapperError> {
+    if std::env::args().nth(1).as_deref() == Some("--resolve-stamp-env") {
+        return stamp_env::resolve(std::env::args().skip(2)).map_err(ProcessWrapperError);
+    }
     let opts = options().map_err(|e| ProcessWrapperError(e.to_string()))?;
 
     let (child_arguments, dep_dir_cleanup) =

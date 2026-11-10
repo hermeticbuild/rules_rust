@@ -90,3 +90,9 @@ jobs:
             "${REMOTE_ARGS[@]}" \
             "${PLATFORM_ARGS[@]}" \
             //...
+
+      - name: Verify automatic stamp cache invalidation
+        if: runner.os == 'Linux'
+        env:
+          USE_BAZEL_VERSION: 9.1.0
+        run: python3 test/unit/stamp/cache/verify.py
