@@ -1,5 +1,5 @@
+load("@rules_rs//rs:rust_library.bzl", _rules_rs_rust_library = "rust_library")
 load("//rust:defs.bzl", "rust_library", "rust_test")
-load("@@rules_rs++rules_rust+rules_rust//rust:defs.bzl", _rules_rs_rust_library = "rust_library")
 
 rust_library(
     name = "label",

@@ -40,7 +40,10 @@ use_repo(osx, "macos_sdk")
 ## Compatibility
 ###############################################################################
 
-bazel_dep(name = "rules_rs", version = "0.0.82")
+bazel_dep(name = "rules_rs", version = "0.2.3")
+
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+use_repo(crate, "rrra")
 
 internal_deps = use_extension("//rust/private:internal_extensions.bzl", "i")
 use_repo(
