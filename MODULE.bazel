@@ -23,7 +23,7 @@ single_version_override(
     module_name = "rules_cc",
     patch_strip = 1,
     patches = ["//test/unit/lto:rules_cc_pic_shared_backends.patch"],
-    version = "0.2.18",
+    version = "0.2.22",
 )
 
 bazel_dep(name = "rules_license", version = "1.0.0")
@@ -43,7 +43,22 @@ use_repo(osx, "macos_sdk")
 bazel_dep(name = "rules_rs", version = "0.2.3")
 
 crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
-use_repo(crate, "rrra")
+crate.from_cargo(
+    name = "rules_rust_vscode",
+    cargo_lock = "@rules_rs//tools/rust_analyzer:Cargo.lock",
+    cargo_toml = "@rules_rs//tools/rust_analyzer:Cargo.toml",
+    incompatible_no_root_alias_targets = True,
+    incompatible_no_root_crate_data = True,
+    platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-pc-windows-msvc",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, rrra = "rules_rust_vscode")
 
 internal_deps = use_extension("//rust/private:internal_extensions.bzl", "i")
 use_repo(
