@@ -2183,8 +2183,8 @@ def rustc_compile(
     # Determine if the build is currently running with --stamp
     stamp = is_stamping_enabled(attr)
 
-    # Explicit stamp=1 retains its unconditional status-file dependency. For
-    # automatic stamping, only the resolved environment should invalidate rustc.
+    # Explicit stamp=1 retains its direct stable-status dependency. For
+    # automatic stamping, filter stable substitutions before running rustc.
     automatic_stamp = stamp and getattr(attr, "stamp", -1) == -1
 
     # Add flags for any 'rustc' lints that are specified.
@@ -2387,23 +2387,28 @@ def rustc_compile(
         stamp_args.add("--resolve-stamp-env")
         stamp_args.add("--output", resolved_env)
         stamp_args.add("--stable-status-file", ctx.info_file)
-        stamp_args.add("--volatile-status-file", ctx.version_file)
         stamp_args.add_all(["{}={}".format(key, env[key]) for key in sorted(env.keys())], before_each = "--env")
         stamp_args.add_all(build_env_files, before_each = "--env-file")
         ctx.actions.run(
             executable = rust_toolchain.process_wrapper,
-            inputs = build_env_files + [ctx.info_file, ctx.version_file],
+            inputs = build_env_files + [ctx.info_file],
             outputs = [resolved_env],
             arguments = [stamp_args],
             mnemonic = "RustStampEnv",
             progress_message = "Resolving Rust stamp environment %{label}",
             toolchain = toolchain,
         )
+
+        # Bazel ignores volatile status changes in its local incremental cache.
+        # Read it when rustc runs so a source edit picks up the current values.
+        stamp_inputs = [resolved_env, ctx.version_file]
         args.process_wrapper_flags.add("--resolved-env-file", resolved_env)
-        compile_inputs = depset([resolved_env], transitive = [compile_inputs])
+        args.process_wrapper_flags.add("--volatile-status-file", ctx.version_file)
+        compile_inputs = depset(stamp_inputs, transitive = [compile_inputs])
         if args_metadata:
             args_metadata.process_wrapper_flags.add("--resolved-env-file", resolved_env)
-            compile_inputs_metadata = depset([resolved_env], transitive = [compile_inputs_metadata])
+            args_metadata.process_wrapper_flags.add("--volatile-status-file", ctx.version_file)
+            compile_inputs_metadata = depset(stamp_inputs, transitive = [compile_inputs_metadata])
 
     if hasattr(attr, "version") and attr.version != "0.0.0":
         formatted_version = " v{}".format(attr.version)

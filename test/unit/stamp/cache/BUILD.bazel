@@ -24,7 +24,7 @@ rust_binary(
     name = "auto_volatile",
     srcs = ["used.rs"],
     edition = "2021",
-    rustc_env = {"STAMP": "{RUST_STAMP_VOLATILE}"},
+    rustc_env = {"STAMP": "{STABLE_RUST_STAMP_VOLATILE_REF}"},
     tags = ["manual"],
 )
 

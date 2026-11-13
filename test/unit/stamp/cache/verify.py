@@ -2,11 +2,13 @@
 """Exercise stamp cache invalidation with real Bazel actions and generated env files.
 
 Run from the workspace root: python3 test/unit/stamp/cache/verify.py
-The isolated status command never changes tracked source files.
+Run against a temporary copy of the fixture so the source-edit test leaves
+tracked files alone.
 """
 import argparse
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -48,7 +50,7 @@ def records(path):
         data = data[end:]
 
 
-def verify(bazel, metadata=False):
+def verify(bazel, package, metadata=False):
     temporary = tempfile.mkdtemp(prefix="rust-stamp-env-")
     temporary = Path(temporary)
     print(f"Logs: {temporary}", flush=True)
@@ -57,16 +59,18 @@ def verify(bazel, metadata=False):
     command.write_text(f'#!/bin/sh\ncat "{status}"\n')
     command.chmod(0o755)
 
-    def build(name, used, unrelated, volatile, stamping=True):
+    def build(name, used, unrelated, volatile, stamping=True, targets=None):
         status.write_text(
             f"STABLE_RUST_STAMP_TEST {used}\n"
             f"STABLE_RUST_STAMP_UNRELATED {unrelated}\n"
+            "STABLE_RUST_STAMP_VOLATILE_REF {RUST_STAMP_VOLATILE}\n"
             f"RUST_STAMP_VOLATILE {volatile}\n"
         )
         execution_log = temporary / f"{name}.json"
         log = temporary / f"{name}.log"
-        targets = ["auto_lib", "auto_lib_consumer"] if metadata else TARGETS
-        invocation = [bazel, "build", *[f"//{PACKAGE}:{target}" for target in targets],
+        if targets is None:
+            targets = ["auto_lib", "auto_lib_consumer"] if metadata else TARGETS
+        invocation = [bazel, "build", *[f"//{package}:{target}" for target in targets],
                       f"--workspace_status_command={command}",
                       f"--execution_log_json_file={execution_log}",
                       "--stamp" if stamping else "--nostamp",
@@ -79,38 +83,45 @@ def verify(bazel, metadata=False):
         if result.returncode:
             raise AssertionError(log.read_text())
         actions = list(records(execution_log))
-        if name == "initial" and metadata:
-            assert any(action.get("mnemonic") == "RustcMetadata" and
-                       action.get("targetLabel", "").endswith(":auto_lib")
-                       for action in actions), "fixture must exercise metadata compilation"
         compiled = {
             action.get("targetLabel", "").rsplit(":", 1)[-1]
             for action in actions
-            if action.get("mnemonic", "").startswith("Rustc")
-            and PACKAGE in action.get("targetLabel", "")
+            if action.get("mnemonic") == "Rustc"
+            and action.get("targetLabel", "").startswith(f"//{package}:")
+        }
+        compiled_metadata = {
+            action.get("targetLabel", "").rsplit(":", 1)[-1]
+            for action in actions
+            if action.get("mnemonic") == "RustcMetadata"
+            and action.get("targetLabel", "").startswith(f"//{package}:")
         }
         resolved = {
             action.get("targetLabel", "").rsplit(":", 1)[-1]
             for action in actions
             if action.get("mnemonic") == "RustStampEnv"
-            and PACKAGE in action.get("targetLabel", "")
+            and action.get("targetLabel", "").startswith(f"//{package}:")
         }
-        print(f"{name}: Rustc={sorted(compiled)}, RustStampEnv={sorted(resolved)}", flush=True)
+        print(f"{name}: Rustc={sorted(compiled)}, RustcMetadata={sorted(compiled_metadata)}, "
+              f"RustStampEnv={sorted(resolved)}", flush=True)
+        if metadata:
+            return compiled, compiled_metadata
         return compiled, resolved
 
     def output(target, expected):
-        value = subprocess.check_output([str(Path("bazel-bin") / PACKAGE / target)], text=True).strip()
+        value = subprocess.check_output([str(Path("bazel-bin") / package / target)], text=True).strip()
         assert value == expected, (target, value, expected)
 
     if metadata:
         # Use a unique value so this also verifies metadata execution on reruns.
         first = temporary.name + "-A"
         second = temporary.name + "-B"
-        build("initial", first, "one", "v1")
-        compiled, _ = build("unused_stamp_changed", first, "two", "v1")
-        assert not compiled, compiled
-        compiled, _ = build("consumed_stamp_changed", second, "two", "v1")
+        _, compiled_metadata = build("initial", first, "one", "v1")
+        assert "auto_lib" in compiled_metadata, compiled_metadata
+        compiled, compiled_metadata = build("unused_stamp_changed", first, "two", "v1")
+        assert not compiled and not compiled_metadata, (compiled, compiled_metadata)
+        compiled, compiled_metadata = build("consumed_stamp_changed", second, "two", "v1")
         assert {"auto_lib", "auto_lib_consumer"} <= compiled, compiled
+        assert "auto_lib" in compiled_metadata, compiled_metadata
         print("PASS: metadata cache invalidation", flush=True)
         return
 
@@ -137,12 +148,20 @@ def verify(bazel, metadata=False):
     assert not resolved, resolved
     output("auto_volatile", "v1")  # Preserve Bazel's best-effort volatile semantics.
 
-    compiled, _ = build("stable_change_refreshes_volatile", "B", "three", "v2")
-    assert {"auto_volatile"} | EXPLICIT <= compiled, compiled
-    assert not compiled & (CONSUMERS | {"auto_unused", "auto_overridden", "disabled"}), compiled
+    source = Path(package) / "used.rs"
+    source.write_text(source.read_text() + "\n// Force recompilation without changing the resolver inputs.\n")
+    compiled, resolved = build("source_change_refreshes_volatile", "B", "two", "v2",
+                               targets=["auto_volatile"])
+    assert compiled == {"auto_volatile"}, compiled
+    assert not resolved, resolved
     output("auto_volatile", "v2")
 
-    compiled, resolved = build("nostamp", "B", "three", "v2", stamping=False)
+    compiled, _ = build("unrelated_stable_and_volatile_changed", "B", "three", "v3",
+                        targets=["auto_volatile", *sorted(EXPLICIT)])
+    assert compiled == EXPLICIT, compiled
+    output("auto_volatile", "v2")
+
+    compiled, resolved = build("nostamp", "B", "three", "v3", stamping=False)
     assert not resolved, resolved
     for target in CONSUMERS - {"auto_lib", "auto_lib_consumer"}:
         output(target, "{STABLE_RUST_STAMP_TEST}")
@@ -155,5 +174,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bazel", default="bazel")
     bazel = parser.parse_args().bazel
-    verify(bazel)
-    verify(bazel, metadata=True)
+    with tempfile.TemporaryDirectory(prefix="fixture_", dir=PACKAGE) as fixture:
+        package = Path(fixture).resolve().relative_to(Path.cwd()).as_posix()
+        for source in [Path(PACKAGE) / "BUILD.bazel", *Path(PACKAGE).glob("*.rs")]:
+            shutil.copyfile(source, Path(fixture) / source.name)
+        verify(bazel, package, metadata=True)
+        verify(bazel, package)

@@ -1,4 +1,4 @@
-//! Resolve workspace stamps without making rustc depend on the status files.
+//! Resolve stable workspace stamps without making rustc depend on the stable status file.
 
 use std::collections::HashMap;
 use tinyjson::JsonValue;
@@ -9,7 +9,6 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
     let mut env_files = Vec::new();
     let mut environment = HashMap::new();
     let mut stable = Vec::new();
-    let mut volatile = Vec::new();
     while let Some(flag) = args.next() {
         let value = args
             .next()
@@ -22,14 +21,14 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
             }
             "--env-file" => env_files.push(value),
             "--stable-status-file" => stable = crate::util::read_stamp_status_to_array(value)?,
-            "--volatile-status-file" => volatile = crate::util::read_stamp_status_to_array(value)?,
             _ => return Err(format!("unknown stamp environment flag: {flag}")),
         }
     }
     // Match process_wrapper's ordering: file values override the action env;
-    // later files override earlier files; stable stamps precede volatile stamps.
+    // later files override earlier files. The compiler wrapper applies volatile
+    // stamps after loading this file.
     environment.extend(crate::options::env_from_files(env_files).map_err(|e| e.to_string())?);
-    let environment = resolve_environment(environment, stable.into_iter().chain(volatile));
+    let environment = resolve_environment(environment, stable.into_iter());
     let output = output.ok_or("missing --output")?;
     std::fs::write(output, encode(environment)?).map_err(|e| e.to_string())
 }
@@ -133,7 +132,6 @@ mod tests {
                 [
                     ("STABLE_USED".to_owned(), "release".to_owned()),
                     ("UNUSED".to_owned(), unused.to_owned()),
-                    ("VOLATILE_USED".to_owned(), "timestamp".to_owned()),
                 ]
                 .iter()
                 .cloned(),
@@ -142,7 +140,7 @@ mod tests {
         };
         assert_eq!(resolve("before"), resolve("after"));
         let resolved = decode(&resolve("unused")).unwrap();
-        assert_eq!(resolved["STAMP"], "release/timestamp");
+        assert_eq!(resolved["STAMP"], "release/{VOLATILE_USED}");
         assert_eq!(resolved["PATH"], "${pwd}/{UNKNOWN}");
     }
 
@@ -207,7 +205,7 @@ mod tests {
     #[test]
     fn rejects_invalid_environment_records() {
         for input in ["{}", "[1]", "[[\"a\"]]", "[[\"a\",3]]"] {
-            assert!(decode(input).is_err(), "{input}");
+            assert!(decode(input).is_err(), "{}", input);
         }
     }
 }

@@ -27,14 +27,21 @@ def _assert_not_stamped(env, action):
     assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
 
 def _assert_automatically_stamped(env, target, action):
-    _assert_not_stamped(env, action)
+    assert_argv_contains(env, action, "--volatile-status-file")
+    assert_argv_contains(env, action, "bazel-out/volatile-status.txt")
+    assert_argv_contains_not(env, action, "--stable-status-file")
+    assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
     assert_argv_contains(env, action, "--resolved-env-file")
     resolvers = [a for a in target.actions if a.mnemonic == "RustStampEnv"]
     asserts.equals(env, 1, len(resolvers))
-    _assert_stamped(env, resolvers[0])
-    status_paths = ["bazel-out/stable-status.txt", "bazel-out/volatile-status.txt"]
-    for file in action.inputs.to_list():
-        asserts.false(env, file.path in status_paths, "rustc must not directly depend on status files")
+    assert_argv_contains(env, resolvers[0], "--stable-status-file")
+    assert_argv_contains_not(env, resolvers[0], "--volatile-status-file")
+    compile_inputs = [file.path for file in action.inputs.to_list()]
+    resolver_inputs = [file.path for file in resolvers[0].inputs.to_list()]
+    asserts.true(env, "bazel-out/volatile-status.txt" in compile_inputs)
+    asserts.false(env, "bazel-out/stable-status.txt" in compile_inputs)
+    asserts.true(env, "bazel-out/stable-status.txt" in resolver_inputs)
+    asserts.false(env, "bazel-out/volatile-status.txt" in resolver_inputs)
 
 def _stamp_build_flag_test_impl(ctx, flag_value):
     env = analysistest.begin(ctx)
