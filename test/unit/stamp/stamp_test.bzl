@@ -1,6 +1,6 @@
 """Unittest to verify workspace status stamping is applied to environment files"""
 
-load("@bazel_skylib//lib:unittest.bzl", "analysistest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//rust:defs.bzl", "rust_binary", "rust_common", "rust_library", "rust_test")
 load(
     "//test/unit:common.bzl",
@@ -12,25 +12,36 @@ load(
 _STAMP_ATTR_VALUES = (0, 1, -1)
 _BUILD_FLAG_VALUES = ("true", "false")
 
-def _assert_stamped(env, action):
-    assert_argv_contains(env, action, "--volatile-status-file")
-    assert_argv_contains(env, action, "bazel-out/volatile-status.txt")
-
-    assert_argv_contains(env, action, "--stable-status-file")
-    assert_argv_contains(env, action, "bazel-out/stable-status.txt")
-
 def _assert_not_stamped(env, action):
     assert_argv_contains_not(env, action, "--volatile-status-file")
     assert_argv_contains_not(env, action, "bazel-out/volatile-status.txt")
 
     assert_argv_contains_not(env, action, "--stable-status-file")
     assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
+    assert_argv_contains_not(env, action, "--resolved-env-file")
+
+def _assert_stamped(env, target, action):
+    assert_argv_contains(env, action, "--volatile-status-file")
+    assert_argv_contains(env, action, "bazel-out/volatile-status.txt")
+    assert_argv_contains_not(env, action, "--stable-status-file")
+    assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
+    assert_argv_contains(env, action, "--resolved-env-file")
+    resolvers = [a for a in target.actions if a.mnemonic == "RustStampEnv"]
+    asserts.equals(env, 1, len(resolvers))
+    assert_argv_contains(env, resolvers[0], "--stable-status-file")
+    assert_argv_contains_not(env, resolvers[0], "--volatile-status-file")
+    compile_inputs = [file.path for file in action.inputs.to_list()]
+    resolver_inputs = [file.path for file in resolvers[0].inputs.to_list()]
+    asserts.true(env, "bazel-out/volatile-status.txt" in compile_inputs)
+    asserts.false(env, "bazel-out/stable-status.txt" in compile_inputs)
+    asserts.true(env, "bazel-out/stable-status.txt" in resolver_inputs)
+    asserts.false(env, "bazel-out/volatile-status.txt" in resolver_inputs)
 
 def _stamp_build_flag_test_impl(ctx, flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     is_test = target[rust_common.crate_info].is_test
@@ -40,7 +51,7 @@ def _stamp_build_flag_test_impl(ctx, flag_value):
     # libraries and tests.
     if flag_value:
         if is_bin and not is_test:
-            _assert_stamped(env, action)
+            _assert_stamped(env, target, action)
         else:
             _assert_not_stamped(env, action)
     else:
@@ -132,15 +143,11 @@ def _attribute_stamp_test_impl(ctx, attribute_value, build_flag_value):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
-    if attribute_value == 1:
-        _assert_stamped(env, action)
-    elif attribute_value == 0:
-        _assert_not_stamped(env, action)
-    elif build_flag_value:
-        _assert_stamped(env, action)
+    if attribute_value == 1 or (attribute_value == -1 and build_flag_value):
+        _assert_stamped(env, target, action)
     else:
         _assert_not_stamped(env, action)
 
@@ -281,7 +288,7 @@ def _process_wrapper_with_stamp_test_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)
 
-    action = target.actions[0]
+    action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
     _assert_not_stamped(env, action)

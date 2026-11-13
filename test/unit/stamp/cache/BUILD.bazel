@@ -1,0 +1,113 @@
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
+
+# Exercised by verify.py with a controlled workspace-status command.
+[
+    rust_binary(
+        name = name,
+        srcs = [src],
+        edition = "2021",
+        rustc_env = {"STAMP": "{STABLE_RUST_STAMP_TEST}"} if used else {},
+        stamp = stamp,
+        tags = ["manual"],
+    )
+    for name, src, used, stamp in [
+        ("auto_unused", "unused.rs", False, -1),
+        ("auto_used", "used.rs", True, -1),
+        ("explicit_unused", "unused.rs", False, 1),
+        ("explicit_used", "used.rs", True, 1),
+        ("disabled", "used.rs", True, 0),
+    ]
+]
+
+rust_binary(
+    name = "auto_volatile",
+    srcs = ["used.rs"],
+    edition = "2021",
+    rustc_env = {"STAMP": "{STABLE_RUST_STAMP_VOLATILE_REF}"},
+    tags = ["manual"],
+)
+
+genrule(
+    name = "generated_env",
+    outs = ["generated.env"],
+    cmd = "printf 'STAMP={STABLE_RUST_STAMP_TEST}\\n' > $@",
+    tags = ["manual"],
+)
+
+rust_binary(
+    name = "auto_generated",
+    srcs = ["used.rs"],
+    edition = "2021",
+    rustc_env = {"STAMP": "overridden by generated file"},
+    rustc_env_files = [":generated_env"],
+    tags = ["manual"],
+)
+
+cargo_build_script(
+    name = "build_script",
+    srcs = ["build.rs"],
+    edition = "2021",
+    tags = ["manual"],
+)
+
+rust_binary(
+    name = "auto_build_script",
+    srcs = ["build_script_consumer.rs"],
+    edition = "2021",
+    tags = ["manual"],
+    deps = [":build_script"],
+)
+
+rust_binary(
+    name = "auto_out_dir",
+    srcs = ["out_dir.rs"],
+    edition = "2021",
+    rustc_env = {"OUT_DIR": "{STABLE_RUST_STAMP_TEST}"},
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "auto_lib",
+    srcs = ["lib.rs"],
+    edition = "2021",
+    rustc_env = {"STAMP": "{STABLE_RUST_STAMP_TEST}"},
+    stamp = -1,
+    tags = ["manual"],
+)
+
+rust_library(
+    name = "auto_lib_consumer",
+    srcs = ["lib_consumer.rs"],
+    edition = "2021",
+    tags = ["manual"],
+    deps = [":auto_lib"],
+)
+
+rust_binary(
+    name = "auto_from_lib",
+    srcs = ["from_lib.rs"],
+    edition = "2021",
+    stamp = 0,
+    tags = ["manual"],
+    deps = [":auto_lib_consumer"],
+)
+
+genrule(
+    name = "overridden_env",
+    outs = ["overridden.env"],
+    cmd = "printf 'STAMP=constant\\n' > $@",
+    tags = ["manual"],
+)
+
+rust_binary(
+    name = "auto_overridden",
+    srcs = ["used.rs"],
+    edition = "2021",
+    rustc_env = {"STAMP": "{STABLE_RUST_STAMP_TEST}"},
+    rustc_env_files = [
+        ":generated_env",
+        ":overridden_env",
+    ],
+    tags = ["manual"],
+)

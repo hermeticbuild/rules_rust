@@ -692,6 +692,11 @@ def _stamp_attribute(default_value):
             - `stamp = -1`: Embedding of build information is controlled by the \
             [--[no]stamp](https://docs.bazel.build/versions/main/user-manual.html#flag--stamp) flag.
 
+            When enabled, Rust compilation resolves stable workspace-status placeholders in `rustc_env` and \
+            `rustc_env_files` in a separate action. Stable status changes that leave the resolved \
+            environment identical do not invalidate compilation or metadata actions. Those actions read \
+            volatile status when they run.
+
             Stamped targets are not rebuilt unless their dependencies change.
 
             For example if a `rust_library` is stamped, and a `rust_binary` depends on that library, the stamped
