@@ -1,0 +1,40 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
+load("//rust:defs.bzl", "rust_binary", "rust_library")
+load(":reproducibility_test.bzl", "reproducibility_test")
+
+# Deliberately unused by the Rust rules, but changes the configuration's output root.
+string_flag(
+    name = "configuration",
+    build_setting_default = "",
+)
+
+write_file(
+    name = "generated_source",
+    out = "generated.rs",
+    content = ["pub fn source_path() -> &'static str { file!() }"],
+)
+
+rust_library(
+    name = "generated",
+    srcs = [":generated_source"],
+    edition = "2021",
+)
+
+rust_binary(
+    name = "binary",
+    srcs = ["main.rs"],
+    edition = "2021",
+    stamp = 0,
+    deps = [":generated"],
+)
+
+reproducibility_test(
+    name = "reproducibility_test",
+    first = ":binary",
+    second = ":binary",
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

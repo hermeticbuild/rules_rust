@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 
 # buildifier: disable=bzl-visibility
-load("//rust/private:utils.bzl", "decode_crate_name_as_label_for_testing", "encode_label_as_crate_name", "encode_raw_string_for_testing", "should_encode_label_in_crate_name", "substitutions_for_testing")
+load("//rust/private:utils.bzl", "decode_crate_name_as_label_for_testing", "determine_lib_name", "determine_output_hash", "encode_label_as_crate_name", "encode_raw_string_for_testing", "should_encode_label_in_crate_name", "substitutions_for_testing")
 
 def _encode_label_as_crate_name_test_impl(ctx):
     env = unittest.begin(ctx)
@@ -121,6 +121,43 @@ substitutions_concatenate_test = unittest.make(_substitutions_concatenate_test_i
 encode_raw_string_test = unittest.make(_encode_raw_string_test_impl)
 decode_test = unittest.make(_decode_test_impl)
 
+def _proc_macro_without_dylib_test_impl(ctx):
+    env = unittest.begin(ctx)
+
+    # UEFI does not support dynamic libraries, but proc macros may still be
+    # analyzed in the target configuration before they are built for exec.
+    toolchain = struct(dylib_ext = "", target_triple = "x86_64-unknown-uefi", target_os = "uefi", target_arch = "x86_64", target_abi = "")
+    asserts.equals(env, "libderive-123.so", determine_lib_name("derive", "proc-macro", toolchain, "123"))
+
+    # Platforms that support dynamic libraries retain their native extension.
+    for extension in [".so", ".dylib", ".dll"]:
+        toolchain = struct(dylib_ext = extension, target_triple = "", target_arch = "x86_64")
+        asserts.equals(env, "libderive" + extension, determine_lib_name("derive", "proc-macro", toolchain))
+        asserts.equals(env, "libdynamic" + extension, determine_lib_name("dynamic", "dylib", toolchain))
+        asserts.equals(env, "libdynamic" + extension, determine_lib_name("dynamic", "cdylib", toolchain))
+    return unittest.end(env)
+
+_proc_macro_without_dylib_test = unittest.make(_proc_macro_without_dylib_test_impl)
+
+def _configuration_independent_output_hash_test_impl(ctx):
+    env = unittest.begin(ctx)
+    label = Label("//test:crate")
+    def_root = "bazel-out/k8-fastbuild-ST-first/bin"
+    other_root = "bazel-out/k8-fastbuild-ST-second/bin"
+    first = struct(path = def_root + "/pkg/lib.rs", root = struct(path = def_root))
+    second = struct(path = other_root + "/pkg/lib.rs", root = struct(path = other_root))
+    asserts.equals(env, determine_output_hash(first, label), determine_output_hash(second, label))
+
+    # Keep distinct labels and relative paths distinct after normalization.
+    different = struct(path = other_root + "/other/lib.rs", root = struct(path = other_root))
+    asserts.true(env, determine_output_hash(first, label) != determine_output_hash(different, label))
+    asserts.true(env, determine_output_hash(first, label) != determine_output_hash(first, Label("//test:other")))
+    source = struct(path = "pkg/lib.rs", root = struct(path = ""))
+    asserts.equals(env, repr(abs(hash(source.path) + hash(repr(label)))), determine_output_hash(source, label))
+    return unittest.end(env)
+
+_configuration_independent_output_hash_test = unittest.make(_configuration_independent_output_hash_test_impl)
+
 def utils_test_suite(name):
     unittest.suite(
         name,
@@ -129,4 +166,6 @@ def utils_test_suite(name):
         substitutions_concatenate_test,
         encode_raw_string_test,
         decode_test,
+        _proc_macro_without_dylib_test,
+        _configuration_independent_output_hash_test,
     )

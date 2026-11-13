@@ -1493,6 +1493,18 @@ def construct_arguments(
             rustc_flags.add("--remap-path-prefix=${pwd}=%s" % remap_path_prefix)
             rustc_flags.add("--remap-path-prefix=${exec_root}=%s" % remap_path_prefix)
 
+    # Normalize generated source paths without embedding the configuration's
+    # output directory in file!(), debug information, or crate metadata. Derive
+    # the prefix from a File so Bazel can rewrite it when path mapping is on.
+    # rustdoc does not accept this flag without unstable options.
+    if remap_path_prefix != None:
+        rustc_flags.add_all(
+            [crate_info.output],
+            format_each = "--remap-path-prefix=%s=bin",
+            map_each = _args_map_bin_dir,
+            expand_directories = False,
+        )
+
     emit_without_paths = []
     redirect_link_to_metadata = build_metadata and crate_info.metadata != None
     for kind in emit:

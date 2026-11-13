@@ -25,6 +25,9 @@ def _remap_path_prefix_test_impl(ctx):
         "--remap-path-prefix=${exec_root}=.",
     ])
 
+    bin_dir = get_bin_dir_from_action(action)
+    assert_argv_contains(env, action, "--remap-path-prefix={}=bin".format(bin_dir))
+
     return analysistest.end(env)
 
 _remap_path_prefix_test = analysistest.make(_remap_path_prefix_test_impl)
