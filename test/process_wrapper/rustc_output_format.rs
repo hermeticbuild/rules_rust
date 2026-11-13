@@ -129,6 +129,8 @@ Error: ProcessWrapperError("failed to process stderr: error parsing rustc output
         assert!(!output.status.success());
         assert!(!exit_code.exists());
         assert!(fs::read_to_string(stderr).unwrap().contains("should be"));
+        let action_stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(action_stderr.contains("should be"), "{}", action_stderr);
     }
 
     #[test]

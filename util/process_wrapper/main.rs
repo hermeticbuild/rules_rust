@@ -409,7 +409,7 @@ fn main() -> Result<(), ProcessWrapperError> {
         .spawn()
         .map_err(|e| ProcessWrapperError(format!("failed to spawn child process: {}", e)))?;
 
-    let mut stderr: Box<dyn io::Write> = if let Some(stderr_file) = opts.stderr_file {
+    let mut stderr: Box<dyn io::Write> = if let Some(stderr_file) = &opts.stderr_file {
         Box::new(
             OpenOptions::new()
                 .create(true)
@@ -463,9 +463,19 @@ fn main() -> Result<(), ProcessWrapperError> {
     let code = match status.code() {
         Some(code) => code,
         None if opts.captured_exit_code_file.is_some() => {
-            return Err(ProcessWrapperError(format!(
-                "child terminated without an exit code: {status}"
-            )));
+            let mut message = format!("child terminated without an exit code: {status}");
+            if let Some(stderr_file) = &opts.stderr_file {
+                // A failed action skips the test runner that would replay this file.
+                drop(stderr);
+                let replay_result = fs::File::open(stderr_file)
+                    .and_then(|mut file| io::copy(&mut file, &mut io::stderr().lock()));
+                if let Err(error) = replay_result {
+                    message.push_str(&format!(
+                        "\nfailed to replay captured stderr from {stderr_file}: {error}"
+                    ));
+                }
+            }
+            return Err(ProcessWrapperError(message));
         }
         None => 1,
     };
