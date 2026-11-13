@@ -53,10 +53,18 @@ cargo_build_script(
 
 rust_binary(
     name = "auto_build_script",
-    srcs = ["used.rs"],
+    srcs = ["build_script_consumer.rs"],
     edition = "2021",
     tags = ["manual"],
     deps = [":build_script"],
+)
+
+rust_binary(
+    name = "auto_out_dir",
+    srcs = ["out_dir.rs"],
+    edition = "2021",
+    rustc_env = {"OUT_DIR": "{STABLE_RUST_STAMP_TEST}"},
+    tags = ["manual"],
 )
 
 rust_library(

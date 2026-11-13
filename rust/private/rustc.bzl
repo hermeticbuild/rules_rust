@@ -2389,6 +2389,8 @@ def rustc_compile(
         stamp_args.add("--stable-status-file", ctx.info_file)
         stamp_args.add_all(["{}={}".format(key, env[key]) for key in sorted(env.keys())], before_each = "--env")
         stamp_args.add_all(build_env_files, before_each = "--env-file")
+        if out_dir != None:
+            stamp_args.add("--ignore-env-key", "OUT_DIR")
         ctx.actions.run(
             executable = rust_toolchain.process_wrapper,
             inputs = build_env_files + [ctx.info_file],

@@ -18,6 +18,7 @@ TARGETS = [
     "auto_used",
     "auto_generated",
     "auto_build_script",
+    "auto_out_dir",
     "auto_overridden",
     "auto_lib",
     "auto_lib_consumer",
@@ -29,11 +30,11 @@ TARGETS = [
 ]
 AUTOMATIC = {
     "auto_unused", "auto_used", "auto_generated", "auto_build_script",
-    "auto_overridden", "auto_lib", "auto_volatile",
+    "auto_overridden", "auto_lib", "auto_out_dir", "auto_volatile",
 }
 CONSUMERS = {
     "auto_used", "auto_generated", "auto_build_script", "auto_lib",
-    "auto_lib_consumer", "auto_from_lib",
+    "auto_lib_consumer", "auto_from_lib", "auto_out_dir",
 }
 EXPLICIT = {"explicit_unused", "explicit_used"}
 

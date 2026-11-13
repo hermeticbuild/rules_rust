@@ -8,6 +8,7 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
     let mut output = None;
     let mut env_files = Vec::new();
     let mut environment = HashMap::new();
+    let mut ignored_keys = Vec::new();
     let mut stable = Vec::new();
     while let Some(flag) = args.next() {
         let value = args
@@ -20,6 +21,7 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
                 environment.insert(key.to_owned(), content.to_owned());
             }
             "--env-file" => env_files.push(value),
+            "--ignore-env-key" => ignored_keys.push(value),
             "--stable-status-file" => stable = crate::util::read_stamp_status_to_array(value)?,
             _ => return Err(format!("unknown stamp environment flag: {flag}")),
         }
@@ -28,6 +30,11 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
     // later files override earlier files. The compiler wrapper applies volatile
     // stamps after loading this file.
     environment.extend(crate::options::env_from_files(env_files).map_err(|e| e.to_string())?);
+    // Values supplied by the compiler wrapper itself (such as OUT_DIR) take
+    // precedence over both declared and file-provided values.
+    for key in ignored_keys {
+        environment.remove(&key);
+    }
     let environment = resolve_environment(environment, stable.into_iter());
     let output = output.ok_or("missing --output")?;
     std::fs::write(output, encode(environment)?).map_err(|e| e.to_string())
