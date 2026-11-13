@@ -2382,18 +2382,26 @@ def rustc_compile(
     env.update(extra_env)
 
     if automatic_stamp:
+        declared_env = ctx.actions.declare_file(crate_info.output.basename + ".declared-env.json", sibling = crate_info.output)
         resolved_env = ctx.actions.declare_file(crate_info.output.basename + ".stamped-env.json", sibling = crate_info.output)
+
+        # Copying the environment into argv can exceed the Windows command-line
+        # limit. Use the declared values so executor-local overrides stay local.
+        ctx.actions.write(
+            output = declared_env,
+            content = json.encode([[key, env[key]] for key in sorted(env.keys())]),
+        )
         stamp_args = ctx.actions.args()
         stamp_args.add("--resolve-stamp-env")
         stamp_args.add("--output", resolved_env)
         stamp_args.add("--stable-status-file", ctx.info_file)
-        stamp_args.add_all(["{}={}".format(key, env[key]) for key in sorted(env.keys())], before_each = "--env")
+        stamp_args.add("--declared-env-file", declared_env)
         stamp_args.add_all(build_env_files, before_each = "--env-file")
         if out_dir != None:
             stamp_args.add("--ignore-env-key", "OUT_DIR")
         ctx.actions.run(
             executable = rust_toolchain.process_wrapper,
-            inputs = build_env_files + [ctx.info_file],
+            inputs = build_env_files + [declared_env, ctx.info_file],
             outputs = [resolved_env],
             arguments = [stamp_args],
             mnemonic = "RustStampEnv",

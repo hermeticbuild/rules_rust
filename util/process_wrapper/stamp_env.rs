@@ -7,7 +7,7 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
     let mut args = args;
     let mut output = None;
     let mut env_files = Vec::new();
-    let mut environment = HashMap::new();
+    let mut declared_env = None;
     let mut ignored_keys = Vec::new();
     let mut stable = Vec::new();
     while let Some(flag) = args.next() {
@@ -16,10 +16,7 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
             .ok_or_else(|| format!("missing value for {flag}"))?;
         match flag.as_str() {
             "--output" => output = Some(value),
-            "--env" => {
-                let (key, content) = value.split_once('=').ok_or("--env requires KEY=VALUE")?;
-                environment.insert(key.to_owned(), content.to_owned());
-            }
+            "--declared-env-file" => declared_env = Some(value),
             "--env-file" => env_files.push(value),
             "--ignore-env-key" => ignored_keys.push(value),
             "--stable-status-file" => stable = crate::util::read_stamp_status_to_array(value)?,
@@ -29,6 +26,7 @@ pub(crate) fn resolve(args: impl Iterator<Item = String>) -> Result<(), String> 
     // Match process_wrapper's ordering: file values override the action env;
     // later files override earlier files. The compiler wrapper applies volatile
     // stamps after loading this file.
+    let mut environment = read_environment(&declared_env.ok_or("missing --declared-env-file")?)?;
     environment.extend(crate::options::env_from_files(env_files).map_err(|e| e.to_string())?);
     // Values supplied by the compiler wrapper itself (such as OUT_DIR) take
     // precedence over both declared and file-provided values.
@@ -201,7 +199,7 @@ mod tests {
     fn rejects_invalid_resolver_arguments() {
         for args in [
             vec!["--unknown", "value"],
-            vec!["--env", "missing-equals"],
+            vec!["--output", "unused.json"],
             vec!["--output"],
             vec![],
         ] {
