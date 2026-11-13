@@ -460,7 +460,15 @@ fn main() -> Result<(), ProcessWrapperError> {
     let status = child
         .wait()
         .map_err(|e| ProcessWrapperError(format!("failed to wait for child process: {}", e)))?;
-    let code = status.code().unwrap_or(1);
+    let code = match status.code() {
+        Some(code) => code,
+        None if opts.captured_exit_code_file.is_some() => {
+            return Err(ProcessWrapperError(format!(
+                "child terminated without an exit code: {status}"
+            )));
+        }
+        None => 1,
+    };
     // Close our handle on the stdout file before emptying it.
     drop(command);
     if code == 0 && opts.discard_stdout_on_success {
