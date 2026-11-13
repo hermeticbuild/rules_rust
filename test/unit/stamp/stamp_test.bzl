@@ -12,21 +12,15 @@ load(
 _STAMP_ATTR_VALUES = (0, 1, -1)
 _BUILD_FLAG_VALUES = ("true", "false")
 
-def _assert_stamped(env, action):
-    assert_argv_contains(env, action, "--volatile-status-file")
-    assert_argv_contains(env, action, "bazel-out/volatile-status.txt")
-
-    assert_argv_contains(env, action, "--stable-status-file")
-    assert_argv_contains(env, action, "bazel-out/stable-status.txt")
-
 def _assert_not_stamped(env, action):
     assert_argv_contains_not(env, action, "--volatile-status-file")
     assert_argv_contains_not(env, action, "bazel-out/volatile-status.txt")
 
     assert_argv_contains_not(env, action, "--stable-status-file")
     assert_argv_contains_not(env, action, "bazel-out/stable-status.txt")
+    assert_argv_contains_not(env, action, "--resolved-env-file")
 
-def _assert_automatically_stamped(env, target, action):
+def _assert_stamped(env, target, action):
     assert_argv_contains(env, action, "--volatile-status-file")
     assert_argv_contains(env, action, "bazel-out/volatile-status.txt")
     assert_argv_contains_not(env, action, "--stable-status-file")
@@ -57,7 +51,7 @@ def _stamp_build_flag_test_impl(ctx, flag_value):
     # libraries and tests.
     if flag_value:
         if is_bin and not is_test:
-            _assert_automatically_stamped(env, target, action)
+            _assert_stamped(env, target, action)
         else:
             _assert_not_stamped(env, action)
     else:
@@ -152,12 +146,8 @@ def _attribute_stamp_test_impl(ctx, attribute_value, build_flag_value):
     action = [action for action in target.actions if action.mnemonic == "Rustc"][0]
     assert_action_mnemonic(env, action, "Rustc")
 
-    if attribute_value == 1:
-        _assert_stamped(env, action)
-    elif attribute_value == 0:
-        _assert_not_stamped(env, action)
-    elif build_flag_value:
-        _assert_automatically_stamped(env, target, action)
+    if attribute_value == 1 or (attribute_value == -1 and build_flag_value):
+        _assert_stamped(env, target, action)
     else:
         _assert_not_stamped(env, action)
 

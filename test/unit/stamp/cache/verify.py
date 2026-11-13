@@ -134,13 +134,12 @@ def verify(bazel, package, metadata=False):
     output("auto_overridden", "constant")
 
     compiled, resolved = build("unused_stamp_changed", "A", "two", "v1")
-    assert not compiled & (AUTOMATIC | {"auto_from_lib", "disabled"}), compiled
-    assert EXPLICIT <= compiled, compiled
-    assert AUTOMATIC <= resolved, resolved
+    assert not compiled, compiled
+    assert AUTOMATIC | EXPLICIT <= resolved, resolved
 
     compiled, _ = build("consumed_stamp_changed", "B", "two", "v1")
-    assert CONSUMERS | EXPLICIT <= compiled, compiled
-    assert not compiled & {"auto_unused", "auto_volatile", "auto_overridden", "disabled"}, compiled
+    assert CONSUMERS | {"explicit_used"} <= compiled, compiled
+    assert not compiled & {"auto_unused", "auto_volatile", "auto_overridden", "disabled", "explicit_unused"}, compiled
     for target in CONSUMERS - {"auto_lib", "auto_lib_consumer"} | {"explicit_used"}:
         output(target, "B")
 
@@ -149,25 +148,36 @@ def verify(bazel, package, metadata=False):
     assert not resolved, resolved
     output("auto_volatile", "v1")  # Preserve Bazel's best-effort volatile semantics.
 
+    compiled, _ = build("unrelated_stable_and_volatile_changed", "B", "three", "v3",
+                        targets=["auto_volatile", *sorted(EXPLICIT)])
+    assert not compiled, compiled
+    output("auto_volatile", "v1")
+
     source = Path(package) / "used.rs"
     source.write_text(source.read_text() + "\n// Force recompilation without changing the resolver inputs.\n")
-    compiled, resolved = build("source_change_refreshes_volatile", "B", "two", "v2",
+    compiled, resolved = build("source_change_refreshes_volatile", "B", "three", "v3",
                                targets=["auto_volatile"])
     assert compiled == {"auto_volatile"}, compiled
     assert not resolved, resolved
-    output("auto_volatile", "v2")
-
-    compiled, _ = build("unrelated_stable_and_volatile_changed", "B", "three", "v3",
-                        targets=["auto_volatile", *sorted(EXPLICIT)])
-    assert compiled == EXPLICIT, compiled
-    output("auto_volatile", "v2")
+    output("auto_volatile", "v3")
 
     compiled, resolved = build("nostamp", "B", "three", "v3", stamping=False)
-    assert not resolved, resolved
+    assert resolved <= EXPLICIT, resolved
     for target in CONSUMERS - {"auto_lib", "auto_lib_consumer"}:
         output(target, "{STABLE_RUST_STAMP_TEST}")
     output("explicit_used", "B")
     output("disabled", "{STABLE_RUST_STAMP_TEST}")
+
+    compiled, resolved = build("nostamp_unused_changed", "B", "four", "v3",
+                               stamping=False, targets=sorted(EXPLICIT))
+    assert not compiled, compiled
+    assert resolved == EXPLICIT, resolved
+    output("explicit_used", "B")
+
+    compiled, _ = build("nostamp_consumed_changed", "C", "four", "v3",
+                        stamping=False, targets=sorted(EXPLICIT))
+    assert compiled == {"explicit_used"}, compiled
+    output("explicit_used", "C")
     print("PASS: automatic, explicit, disabled, generated, Cargo and volatile stamping", flush=True)
 
 

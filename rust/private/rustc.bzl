@@ -870,7 +870,6 @@ def collect_inputs(
         dep_info,
         build_info,
         lint_files,
-        stamp = False,
         force_depend_on_objects = False,
         experimental_use_cc_common_link = False,
         include_link_flags = True,
@@ -891,8 +890,6 @@ def collect_inputs(
         dep_info (DepInfo): The target Crate's dependency information.
         build_info (BuildInfo): The target Crate's build settings.
         lint_files (list): List of files with rustc args for the Crate's lint settings.
-        stamp (bool, optional): Whether or not workspace status stamping is enabled. For more details see
-            https://docs.bazel.build/versions/main/user-manual.html#flag--stamp
         force_depend_on_objects (bool, optional): Forces dependencies of this rule to be objects rather than
             metadata, even for libraries. This is used in rustdoc tests.
         experimental_use_cc_common_link (bool, optional): Whether rules_rust uses cc_common.link to link
@@ -1028,11 +1025,8 @@ def collect_inputs(
                 output_replacement = crate_info.output.path,
             )
 
-    # If stamping is enabled include the volatile and stable status info file
-    stamp_info = [ctx.version_file, ctx.info_file] if stamp else []
-
     compile_inputs = depset(
-        linkstamp_outs + stamp_info,
+        linkstamp_outs,
         transitive = [
             nolinkstamp_compile_inputs,
         ],
@@ -1162,7 +1156,6 @@ def construct_arguments(
         force_all_deps_direct = False,
         add_flags_for_binary = False,
         include_link_flags = True,
-        stamp = False,
         remap_path_prefix = ".",
         use_json_output = False,
         build_metadata = False,
@@ -1233,8 +1226,6 @@ def construct_arguments(
             to the commandline as opposed to -L.
         add_flags_for_binary (bool, optional): Whether to add "bin" link flags to the command regardless of `emit` and `crate_type`.
         include_link_flags (bool, optional): Whether to include flags like `-l` that instruct the linker to search for a library.
-        stamp (bool, optional): Whether or not workspace status stamping is enabled. For more details see
-            https://docs.bazel.build/versions/main/user-manual.html#flag--stamp
         remap_path_prefix (str, optional): A value used to remap `${pwd}`, `${exec_root}`, and `${output_base}` to.
             If set to None, no remapping will be applied. On macOS, also adds `-oso_prefix` to strip absolute paths
             from N_OSO linker entries.
@@ -1308,11 +1299,6 @@ def construct_arguments(
     process_wrapper_flags.add("--subst", "pwd=${pwd}")
     process_wrapper_flags.add("--subst", "exec_root=${exec_root}")
     process_wrapper_flags.add("--subst", "output_base=${output_base}")
-
-    # If stamping is enabled, enable the functionality in the process wrapper
-    if stamp:
-        process_wrapper_flags.add("--volatile-status-file", ctx.version_file)
-        process_wrapper_flags.add("--stable-status-file", ctx.info_file)
 
     if crate_info.root.is_source:
         # Both ctx.label.workspace_root and ctx.label.package are relative paths
@@ -2180,12 +2166,7 @@ def rustc_compile(
 
     runtime_libs = get_cc_toolchain_runtime_libs(cc_toolchain, feature_configuration, crate_info.type, resolve_cc_runtime_linkage(ctx))
 
-    # Determine if the build is currently running with --stamp
     stamp = is_stamping_enabled(attr)
-
-    # Explicit stamp=1 retains its direct stable-status dependency. For
-    # automatic stamping, filter stable substitutions before running rustc.
-    automatic_stamp = stamp and getattr(attr, "stamp", -1) == -1
 
     # Add flags for any 'rustc' lints that are specified.
     lint_files = []
@@ -2208,7 +2189,6 @@ def rustc_compile(
         dep_info = dep_info,
         build_info = build_info,
         lint_files = lint_files,
-        stamp = stamp and not automatic_stamp,
         experimental_use_cc_common_link = use_cc_common_link,
         runtime_libs = runtime_libs,
     )
@@ -2318,7 +2298,6 @@ def rustc_compile(
         build_flags_files = build_flags_files,
         bin_link_flags = getattr(build_info, "bin_link_flags", None) if build_info and crate_info.type == "bin" and not crate_info.is_test else None,
         force_all_deps_direct = force_all_deps_direct,
-        stamp = stamp and not automatic_stamp,
         use_json_output = bool(build_metadata) or bool(rustc_output) or bool(rustc_rmeta_output),
         skip_expanding_rustc_env = skip_expanding_rustc_env,
         require_explicit_unstable_features = require_explicit_unstable_features,
@@ -2354,7 +2333,6 @@ def rustc_compile(
             build_env_files = build_env_files,
             build_flags_files = build_flags_files,
             force_all_deps_direct = force_all_deps_direct,
-            stamp = stamp and not automatic_stamp,
             use_json_output = True,
             build_metadata = True,
             skip_expanding_rustc_env = skip_expanding_rustc_env,
@@ -2381,7 +2359,7 @@ def rustc_compile(
         env["RUSTC_BOOTSTRAP"] = "1"
     env.update(extra_env)
 
-    if automatic_stamp:
+    if stamp:
         declared_env = ctx.actions.declare_file(crate_info.output.basename + ".declared-env.json", sibling = crate_info.output)
         resolved_env = ctx.actions.declare_file(crate_info.output.basename + ".stamped-env.json", sibling = crate_info.output)
 
