@@ -111,6 +111,40 @@ Error: ProcessWrapperError("failed to process stderr: error parsing rustc output
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_signal_does_not_write_captured_exit_code() {
+        let exit_code = artifact_path("signal-exit-code");
+        let stderr = artifact_path("signal-stderr");
+        let output = run_fake_rustc(
+            &[
+                "--captured-exit-code-file",
+                exit_code.to_str().unwrap(),
+                "--stderr-file",
+                stderr.to_str().unwrap(),
+            ],
+            &["abort"],
+        );
+
+        assert!(!output.status.success());
+        assert!(!exit_code.exists());
+        assert!(fs::read_to_string(stderr).unwrap().contains("should be"));
+        let action_stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(action_stderr.contains("should be"), "{}", action_stderr);
+    }
+
+    #[test]
+    fn test_numeric_exit_137_is_captured() {
+        let exit_code = artifact_path("numeric-exit-code");
+        let output = run_fake_rustc(
+            &["--captured-exit-code-file", exit_code.to_str().unwrap()],
+            &["exit-137"],
+        );
+
+        assert!(output.status.success());
+        assert_eq!(fs::read_to_string(exit_code).unwrap(), "137\n");
+    }
+
     #[test]
     fn test_working_dir_in_binary_artifact_is_rejected() {
         let working_dir = working_dir();

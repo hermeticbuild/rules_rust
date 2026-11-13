@@ -140,7 +140,7 @@ pub(crate) fn options() -> Result<Options, OptionError> {
     );
     flags.define_flag(
         "--captured-exit-code-file",
-        "Write subprocess exit code to this file and exit successfully.",
+        "Write a numeric subprocess exit code to this file and exit successfully. If the subprocess is terminated by a signal, fail without writing the file.",
         &mut captured_exit_code_file,
     );
     flags.define_flag(
