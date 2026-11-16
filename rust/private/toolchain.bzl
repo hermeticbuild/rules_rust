@@ -140,7 +140,7 @@ def _symlink_sysroot_tree(ctx, name, target, target_files = None):
     Args:
         ctx (ctx): The toolchain's context object
         name (str): The name of the sysroot directory (typically `ctx.label.name`)
-        target (Target): A target owning files to symlink
+        target (Target): A target providing files to symlink
         target_files (depset): An optional depset to use in place of `target.files`.
 
     Returns:
@@ -150,17 +150,11 @@ def _symlink_sysroot_tree(ctx, name, target, target_files = None):
     if target_files == None:
         target_files = target.files
     for file in target_files.to_list():
-        # Parse the path to the file relative to the workspace root so a
-        # symlink matching this path can be created within the sysroot.
-
-        # The code blow attempts to parse any workspace names out of the
-        # path. For local targets, this code is a noop.
-        if target.label.workspace_root:
-            file_path = file.path.split(target.label.workspace_root, 1)[-1]
-        else:
-            file_path = file.path
-
-        symlink = ctx.actions.declare_file("{}/{}".format(name, file_path.lstrip("/")))
+        # A target can forward files from other repositories. Strip ../<repo>/
+        # from each external file's short_path to use its repository-relative path.
+        short_path = file.short_path
+        file_path = short_path.split("/", 2)[2] if short_path.startswith("../") else file.path
+        symlink = ctx.actions.declare_file("%s/%s" % (name, file_path))
 
         ctx.actions.symlink(
             output = symlink,
@@ -245,9 +239,10 @@ def _generate_sysroot(
     """
     name = ctx.label.name
 
-    # Define runfiles
     direct_files = []
     transitive_file_sets = []
+    tool_files = []
+    tool_runfiles = []
 
     # Rustc
     sysroot_rustc = _symlink_sysroot_bin(ctx, name, "bin", rustc)
@@ -261,39 +256,39 @@ def _generate_sysroot(
 
     # Rustdoc
     sysroot_rustdoc = _symlink_sysroot_bin(ctx, name, "bin", rustdoc)
-    direct_files.append(sysroot_rustdoc)
+    tool_files.append(sysroot_rustdoc)
 
     # Clippy
     sysroot_clippy = None
     if clippy:
         sysroot_clippy = _symlink_sysroot_bin(ctx, name, "bin", clippy)
-        direct_files.append(sysroot_clippy)
+        tool_files.append(sysroot_clippy)
         if clippy_runfiles:
-            transitive_file_sets.append(clippy_runfiles)
+            tool_runfiles.append(clippy_runfiles)
 
     # Cargo
     sysroot_cargo = None
     if cargo:
         sysroot_cargo = _symlink_sysroot_bin(ctx, name, "bin", cargo)
-        direct_files.append(sysroot_cargo)
+        tool_files.append(sysroot_cargo)
         if cargo_runfiles:
-            transitive_file_sets.append(cargo_runfiles)
+            tool_runfiles.append(cargo_runfiles)
 
     # Cargo-clippy
     sysroot_cargo_clippy = None
     if cargo_clippy:
         sysroot_cargo_clippy = _symlink_sysroot_bin(ctx, name, "bin", cargo_clippy)
-        direct_files.append(sysroot_cargo_clippy)
+        tool_files.append(sysroot_cargo_clippy)
         if cargo_clippy_runfiles:
-            transitive_file_sets.append(cargo_clippy_runfiles)
+            tool_runfiles.append(cargo_clippy_runfiles)
 
     # Rustfmt
     sysroot_rustfmt = None
     if rustfmt:
         sysroot_rustfmt = _symlink_sysroot_bin(ctx, name, "bin", rustfmt)
-        direct_files.append(sysroot_rustfmt)
+        tool_files.append(sysroot_rustfmt)
         if rustfmt_runfiles:
-            transitive_file_sets.append(rustfmt_runfiles)
+            tool_runfiles.append(rustfmt_runfiles)
 
     # Linker
     sysroot_linker = None
@@ -364,14 +359,15 @@ def _generate_sysroot(
         ]),
     )
 
-    # Create a depset of all sysroot files (symlinks and their real paths)
-    all_files = depset(direct_files, transitive = transitive_file_sets)
+    compile_files = depset(direct_files, transitive = transitive_file_sets)
+    all_files = depset(tool_files, transitive = [compile_files] + tool_runfiles)
 
     return struct(
         all_files = all_files,
         cargo = sysroot_cargo,
         cargo_clippy = sysroot_cargo_clippy,
         clippy = sysroot_clippy,
+        compile_files = compile_files,
         linker = sysroot_linker,
         rust_std = sysroot_rust_std,
         rustc = sysroot_rustc,
@@ -461,6 +457,7 @@ def _rust_toolchain_impl(ctx):
 
     rust_std = ctx.attr.rust_std
 
+    clippy_runfiles = _default_runfiles_files(ctx.attr.clippy_driver) or depset()
     sysroot = _generate_sysroot(
         ctx = ctx,
         rustc = ctx.file.rustc,
@@ -470,7 +467,7 @@ def _rust_toolchain_impl(ctx):
         rustfmt = ctx.file.rustfmt,
         rustfmt_runfiles = _default_runfiles_files(ctx.attr.rustfmt),
         clippy = ctx.file.clippy_driver,
-        clippy_runfiles = _default_runfiles_files(ctx.attr.clippy_driver),
+        clippy_runfiles = clippy_runfiles,
         cargo = ctx.file.cargo,
         cargo_runfiles = _default_runfiles_files(ctx.attr.cargo),
         cargo_clippy = ctx.file.cargo_clippy,
@@ -616,10 +613,8 @@ def _rust_toolchain_impl(ctx):
             link_std_dylib,
         )
 
-    # C++ toolchain inputs are attached to the Rust actions that use them.
-    all_files_depsets = [sysroot.all_files]
-    if ctx.file.dlltool:
-        all_files_depsets.append(depset([ctx.file.dlltool]))
+    # Windows GNU rlibs can require dlltool for raw-dylib imports.
+    dlltool_files = [ctx.file.dlltool] if ctx.file.dlltool else []
 
     # Parse the version string once so downstream rules can branch on the
     # semver components without re-parsing. `None` for empty or non-semver
@@ -627,13 +622,15 @@ def _rust_toolchain_impl(ctx):
     version_semver = semver(ctx.attr.version) if _is_semver_string(ctx.attr.version) else None
 
     toolchain = platform_common.ToolchainInfo(
-        all_files = depset(transitive = all_files_depsets),
+        all_files = depset(dlltool_files, transitive = [sysroot.all_files]),
         binary_ext = ctx.attr.binary_ext,
         cargo = sysroot.cargo,
         channel = ctx.attr.channel,
         clippy_driver = sysroot.clippy,
+        clippy_runfiles = clippy_runfiles,
         cargo_clippy = sysroot.cargo_clippy,
         compilation_mode_opts = compilation_mode_opts,
+        compile_files = depset(dlltool_files, transitive = [sysroot.compile_files]),
         default_edition = ctx.attr.default_edition,
         dlltool = ctx.file.dlltool,
         dylib_ext = ctx.attr.dylib_ext,

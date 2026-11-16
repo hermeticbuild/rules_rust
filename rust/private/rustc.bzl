@@ -990,7 +990,7 @@ def collect_inputs(
             transitive_crate_outputs,
             crate_info.compile_data,
             dep_info.transitive_proc_macro_data,
-            toolchain.all_files,
+            toolchain.compile_files,
         ] + ([] if experimental_use_cc_common_link or not is_linking_action else [
             runtime_libs,
         ]) + ([linker_depset] if is_linking_action and not experimental_use_cc_common_link else []),

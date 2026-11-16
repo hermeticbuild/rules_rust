@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_rust_toolchain_test_target_json//:defs.bzl", "TARGET_JSON")
-load("//rust:defs.bzl", "rust_lto_flag")
+load("//rust:defs.bzl", "rust_clippy_aspect", "rust_library", "rust_lto_flag")
 load("//rust:toolchain.bzl", "rust_stdlib_filegroup", "rust_toolchain")
 load("//rust/platform:triple.bzl", "triple")
 
@@ -96,6 +96,41 @@ def _std_libs_support_srcs_outside_package_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _forwarded_rustc_lib_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    rustc_lib = target[platform_common.ToolchainInfo].rustc_lib.to_list()
+    asserts.equals(
+        env,
+        ["%s/%s/defs.bzl" % (target.label.package, target.label.name)],
+        [file.short_path for file in rustc_lib],
+    )
+    return analysistest.end(env)
+
+def _compile_tool_inputs_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    rustc_actions = analysistest.target_actions(env)
+    clippy_actions = analysistest.target_under_test(env).actions
+    rustc_inputs = [file.basename for action in rustc_actions if action.mnemonic == "Rustc" for file in action.inputs.to_list()]
+    clippy_inputs = [file.basename for action in clippy_actions if action.mnemonic == "Clippy" for file in action.inputs.to_list()]
+
+    for basename in ["mock_rustc.exe", "defs.bzl"]:
+        asserts.true(env, basename in rustc_inputs, "Rustc input missing: %s" % basename)
+    for basename in ["mock_rustdoc.exe", "mock_clippy.exe", "toolchain-test-triple.json"]:
+        asserts.false(env, basename in rustc_inputs, "Unexpected Rustc input: %s" % basename)
+    for basename in ["mock_clippy.exe", "toolchain-test-triple.json"]:
+        asserts.true(env, basename in clippy_inputs, "Clippy input missing: %s" % basename)
+    return analysistest.end(env)
+
+forwarded_rustc_lib_test = analysistest.make(_forwarded_rustc_lib_test_impl)
+compile_tool_inputs_test = analysistest.make(
+    _compile_tool_inputs_test_impl,
+    config_settings = {
+        "//command_line_option:extra_toolchains": [str(Label(":test_toolchain"))],
+    },
+    extra_target_under_test_aspects = [rust_clippy_aspect],
+)
+
 toolchain_specifies_target_triple_test = analysistest.make(_toolchain_specifies_target_triple_test_impl)
 toolchain_specifies_target_json_test = analysistest.make(_toolchain_specifies_target_json_test_impl)
 toolchain_location_expands_linkflags_test = analysistest.make(_toolchain_location_expands_linkflags_impl)
@@ -144,19 +179,58 @@ def _define_test_targets():
         is_executable = True,
     )
 
+    native.filegroup(
+        name = "forwarded_rustc_lib",
+        srcs = ["@rules_rust_toolchain_test_target_json//:defs.bzl"],
+    )
+
+    write_file(
+        name = "mock_clippy_bin",
+        out = "mock_clippy.exe",
+        content = [],
+        is_executable = True,
+    )
+
+    native.filegroup(
+        name = "mock_clippy",
+        srcs = [":mock_clippy_bin"],
+        data = ["toolchain-test-triple.json"],
+    )
+
     rust_toolchain(
         name = "rust_triple_toolchain",
         binary_ext = "",
+        clippy_driver = ":mock_clippy",
         dylib_ext = ".so",
         exec_triple = "x86_64-unknown-none",
+        linker = ":mock_rust_lld",
+        process_wrapper = "//util/process_wrapper:bootstrap_process_wrapper",
         rust_doc = ":mock_rustdoc",
         rust_std = ":std_libs",
         rustc = ":mock_rustc",
-        process_wrapper = "@rules_rust//util/process_wrapper",
-        linker = ":mock_rust_lld",
+        rustc_lib = ":forwarded_rustc_lib",
         staticlib_ext = ".a",
         stdlib_linkflags = [],
         target_triple = "toolchain-test-triple",
+    )
+
+    native.toolchain(
+        name = "test_toolchain",
+        toolchain = ":rust_triple_toolchain",
+        toolchain_type = "//rust:toolchain_type",
+    )
+
+    write_file(
+        name = "compile_tool_inputs_src",
+        out = "compile_tool_inputs.rs",
+        content = [],
+    )
+
+    rust_library(
+        name = "compile_tool_inputs_library",
+        srcs = [":compile_tool_inputs_src"],
+        edition = "2018",
+        tags = ["manual"],
     )
 
     encoded_target_json = json.encode(TARGET_JSON)
@@ -273,6 +347,16 @@ def toolchain_test_suite(name):
         target_under_test = ":std_libs_with_srcs_outside_package",
     )
 
+    forwarded_rustc_lib_test(
+        name = "forwarded_rustc_lib_test",
+        target_under_test = ":rust_triple_toolchain",
+    )
+
+    compile_tool_inputs_test(
+        name = "compile_tool_inputs_test",
+        target_under_test = ":compile_tool_inputs_library",
+    )
+
     native.test_suite(
         name = name,
         tests = [
@@ -283,5 +367,7 @@ def toolchain_test_suite(name):
             ":toolchain_location_expands_extra_rustc_flags_test",
             ":toolchain_uses_custom_lto_flag_test",
             ":std_libs_support_srcs_outside_package_test",
+            ":forwarded_rustc_lib_test",
+            ":compile_tool_inputs_test",
         ],
     )
