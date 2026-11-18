@@ -1,0 +1,17 @@
+load("//cargo:defs.bzl", "cargo_build_script")
+load("//rust:defs.bzl", "rust_test")
+
+# Build scripts that probe the compiler run `$RUSTC` without `--sysroot`, and
+# still need it to find the standard library for `TARGET`.
+cargo_build_script(
+    name = "rustc_sysroot_build_rs",
+    srcs = ["build.rs"],
+    edition = "2021",
+)
+
+rust_test(
+    name = "rustc_sysroot_test",
+    srcs = ["test.rs"],
+    edition = "2021",
+    deps = [":rustc_sysroot_build_rs"],
+)

@@ -736,6 +736,14 @@ def _cargo_build_script_impl(ctx):
             map_each = _get_dirname,
             format_each = "--target_rustc_flag=--sysroot=%s",
         )
+
+        # Also for the build script's own rustc runs, which rustc's default
+        # sysroot may not serve.
+        args.add_all(
+            [toolchain.sysroot_anchor],
+            map_each = _get_dirname,
+            format_each = "--build_script_sysroot=%s",
+        )
     args.add_all(collect_cfg_query_rustc_flags(ctx, toolchain), format_each = "--target_rustc_flag=%s")
     args.add(script, format = "--script=%s")
     args.add(links, format = "--links=%s")
