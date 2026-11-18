@@ -17,12 +17,18 @@
 
 use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::fs::{create_dir_all, read_dir, read_to_string, remove_file, write};
 use std::path::Path;
 use std::process::Command;
 
 use cargo_build_script_runner::cargo_manifest_dir::{remove_symlink, symlink, RunfilesMaker};
 use cargo_build_script_runner::{BuildScriptOutput, CompileAndLinkFlags, SUPPRESS_WARNINGS_ENV};
+
+/// The rustc a build script's `RUSTC` wraps, when `RUSTC` is this runner.
+const WRAPPED_RUSTC_ENV: &str = "RULES_RUST_BUILD_SCRIPT_WRAPPED_RUSTC";
+/// The sysroot the wrapped rustc gets.
+const WRAPPED_RUSTC_SYSROOT_ENV: &str = "RULES_RUST_BUILD_SCRIPT_WRAPPED_RUSTC_SYSROOT";
 
 fn parse_env_file(contents: &str) -> Result<Vec<(String, String)>, String> {
     fn push_variable(
@@ -90,6 +96,7 @@ fn run_buildrs() -> Result<(), String> {
         target_rustc_flags,
         cargo_manifest_maker,
         allow_build_script_to_detect_nonhermetic_paths,
+        build_script_sysroot,
     } = Args::parse();
 
     cargo_manifest_maker.create_runfiles_dir().unwrap();
@@ -133,6 +140,19 @@ fn run_buildrs() -> Result<(), String> {
     let target_env_vars = get_target_env_vars(&rustc_env, &target_rustc_flags)
         .expect("Error getting target env vars from rustc");
 
+    // With a generated sysroot, the build script's `RUSTC` is this runner,
+    // which runs rustc with that sysroot (see `WrappedRustc`).
+    let script_rustc = match &build_script_sysroot {
+        // argv[0] rather than `current_exe()`, which resolves symlinks; see
+        // the comment on `exec_root`.
+        Some(_) => exec_root.join(
+            env::args_os()
+                .next()
+                .ok_or("Failed to find the runner's own path: argv[0] is empty")?,
+        ),
+        None => rustc.clone(),
+    };
+
     let script_path = exec_root.join(&progname);
     let mut command = Command::new(&script_path);
     command
@@ -140,8 +160,13 @@ fn run_buildrs() -> Result<(), String> {
         .envs(target_env_vars)
         .env("OUT_DIR", &out_dir_abs)
         .env("CARGO_MANIFEST_DIR", manifest_dir)
-        .env("RUSTC", rustc)
+        .env("RUSTC", script_rustc)
         .env("RUST_BACKTRACE", "full");
+    if let Some(sysroot) = &build_script_sysroot {
+        command
+            .env(WRAPPED_RUSTC_ENV, &rustc)
+            .env(WRAPPED_RUSTC_SYSROOT_ENV, exec_root.join(sysroot));
+    }
 
     // The script binary may have a `<script>.runfiles/` tree or a
     // `<script>.runfiles_manifest` file materialized next to it by Bazel
@@ -441,6 +466,8 @@ struct Args {
     target_rustc_flags: Vec<String>,
     cargo_manifest_maker: RunfilesMaker,
     allow_build_script_to_detect_nonhermetic_paths: bool,
+    /// The toolchain's generated sysroot, for the build script's rustc runs.
+    build_script_sysroot: Option<String>,
 }
 
 impl Args {
@@ -471,6 +498,7 @@ impl Args {
         let mut cargo_manifest_maker: Result<RunfilesMaker, String> =
             Err("Argument `cargo_manifest_args` not provided".to_owned());
         let mut allow_build_script_to_detect_nonhermetic_paths = false;
+        let mut build_script_sysroot = None;
 
         for mut arg in env::args().skip(1) {
             if arg.starts_with("--script=") {
@@ -507,6 +535,8 @@ impl Args {
                 ));
             } else if arg == "--allow_build_script_to_detect_nonhermetic_paths" {
                 allow_build_script_to_detect_nonhermetic_paths = true;
+            } else if arg.starts_with("--build_script_sysroot=") {
+                build_script_sysroot = Some(arg.split_off("--build_script_sysroot=".len()));
             }
         }
 
@@ -527,6 +557,7 @@ impl Args {
             target_rustc_flags,
             cargo_manifest_maker: cargo_manifest_maker.unwrap(),
             allow_build_script_to_detect_nonhermetic_paths,
+            build_script_sysroot,
         }
     }
 }
@@ -582,9 +613,70 @@ fn parse_rustc_cfg_output(stdout: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// A build script's rustc run, through its `RUSTC`. rustc finds its default
+/// sysroot from where `librustc_driver` lives, which holds no standard library
+/// when the toolchain assembles its sysroot from separately fetched parts, so
+/// scripts that probe the compiler without `--sysroot` would fail.
+struct WrappedRustc {
+    rustc: OsString,
+    sysroot: OsString,
+}
+
+impl WrappedRustc {
+    /// The rustc run this process is, if the runner started a build script
+    /// with this binary as its `RUSTC`.
+    fn from_env() -> Result<Option<Self>, String> {
+        match (
+            env::var_os(WRAPPED_RUSTC_ENV),
+            env::var_os(WRAPPED_RUSTC_SYSROOT_ENV),
+        ) {
+            (Some(rustc), Some(sysroot)) => Ok(Some(Self { rustc, sysroot })),
+            (None, None) => Ok(None),
+            (Some(_), None) => Err(format!(
+                "{WRAPPED_RUSTC_ENV} is set without {WRAPPED_RUSTC_SYSROOT_ENV}"
+            )),
+            (None, Some(_)) => Err(format!(
+                "{WRAPPED_RUSTC_SYSROOT_ENV} is set without {WRAPPED_RUSTC_ENV}"
+            )),
+        }
+    }
+
+    /// Runs rustc with `args` and returns its exit code.
+    fn run(self, args: Vec<OsString>) -> Result<i32, String> {
+        let Self { rustc, sysroot } = self;
+        let status = Command::new(&rustc)
+            .args(wrapped_rustc_args(args, sysroot))
+            .status()
+            .map_err(|err| format!("Failed to run {}: {err}", Path::new(&rustc).display()))?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+/// `args` after `--sysroot <sysroot>`, unless they pass a sysroot already:
+/// rustc rejects a repeated `--sysroot`, and a script that names one wants
+/// that one. A `--sysroot` inside an `@argfile` isn't seen.
+fn wrapped_rustc_args(args: Vec<OsString>, sysroot: OsString) -> Vec<OsString> {
+    let has_sysroot = args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == "--sysroot" || arg.starts_with("--sysroot=")
+    });
+    if has_sysroot {
+        return args;
+    }
+    vec![OsString::from("--sysroot"), sysroot]
+        .into_iter()
+        .chain(args)
+        .collect()
+}
+
 fn main() {
-    std::process::exit(match run_buildrs() {
-        Ok(_) => 0,
+    let result = match WrappedRustc::from_env() {
+        Ok(Some(rustc)) => rustc.run(env::args_os().skip(1).collect()),
+        Ok(None) => run_buildrs().map(|()| 0),
+        Err(err) => Err(err),
+    };
+    std::process::exit(match result {
+        Ok(code) => code,
         Err(err) => {
             // Neatly print errors
             eprintln!("{err}");
@@ -607,6 +699,28 @@ mod test {
         let dir = std::env::temp_dir().join(format!("rules_rust_bin_test_{}_{}", label, nanos));
         create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn os_args(args: &[&str]) -> Vec<OsString> {
+        args.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn wrapped_rustc_gets_the_sysroot() {
+        assert_eq!(
+            wrapped_rustc_args(os_args(&["--print=cfg"]), "sysroot".into()),
+            os_args(&["--sysroot", "sysroot", "--print=cfg"]),
+        );
+    }
+
+    #[test]
+    fn wrapped_rustc_keeps_the_scripts_own_sysroot() {
+        for args in [&["--sysroot=own", "-"][..], &["--sysroot", "own", "-"][..]] {
+            assert_eq!(
+                wrapped_rustc_args(os_args(args), "sysroot".into()),
+                os_args(args),
+            );
+        }
     }
 
     fn basenames(names: &[&str]) -> Vec<String> {
