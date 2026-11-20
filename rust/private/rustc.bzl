@@ -1268,6 +1268,11 @@ def construct_arguments(
 
     # Wrapper args first
     process_wrapper_flags = ctx.actions.args()
+    process_wrapper_flags.set_param_file_format("multiline")
+
+    # Always use the file on Windows, where quoting can increase the length
+    # of the command line beyond Bazel's spill estimate.
+    process_wrapper_flags.use_param_file("--flagfile=%s", use_always = toolchain.exec_triple.system == "windows")
 
     for build_env_file in build_env_files:
         process_wrapper_flags.add("--env-file", build_env_file)

@@ -164,10 +164,15 @@ pub(crate) fn options() -> Result<Options, OptionError> {
         &mut require_explicit_unstable_features,
     );
 
-    let mut child_args = match flags
-        .parse(env::args().collect())
-        .map_err(OptionError::FlagError)?
-    {
+    let mut argv: Vec<_> = env::args().collect();
+    if let Some(path) = argv.get(1).and_then(|arg| arg.strip_prefix("--flagfile=")) {
+        let contents = std::fs::read_to_string(path)
+            .map_err(|e| OptionError::Generic(format!("failed to read flag file {path:?}: {e}")))?;
+        // Bazel places the wrapper's flag file first and writes one argument per line.
+        argv.splice(1..2, contents.lines().map(str::to_owned));
+    }
+
+    let mut child_args = match flags.parse(argv).map_err(OptionError::FlagError)? {
         ParseOutcome::Help(help) => {
             eprintln!("{help}");
             exit(0);

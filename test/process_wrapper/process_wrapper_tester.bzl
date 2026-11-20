@@ -56,12 +56,16 @@ def _process_wrapper_tester_impl(ctx):
         args.add("--subst", "pwd=${pwd}")
         args.add("--subst", "key=value")
 
-    args.add("--")
+    if ctx.attr.use_param_file:
+        args.set_param_file_format("multiline")
+        args.use_param_file("--flagfile=%s", use_always = True)
 
-    args.add(ctx.executable._process_wrapper_tester)
-    args.add(ctx.attr.test_config)
-    args.add("--current-dir", "${pwd}")
-    args.add("--test-subst", "subst key to ${key}")
+    child_args = ctx.actions.args()
+    child_args.add("--")
+    child_args.add(ctx.executable._process_wrapper_tester)
+    child_args.add(ctx.attr.test_config)
+    child_args.add("--current-dir", "${pwd}")
+    child_args.add("--test-subst", "subst key to ${key}")
 
     extra_args = ctx.actions.args()
     if combined or ctx.attr.test_config == "subst-pwd":
@@ -76,7 +80,7 @@ def _process_wrapper_tester_impl(ctx):
         executable = ctx.executable._process_wrapper,
         inputs = ctx.files.env_files + ctx.files.arg_files,
         outputs = outputs + exit_code_outputs,
-        arguments = [args, extra_args],
+        arguments = [args, child_args, extra_args],
         env = env,
         tools = [ctx.executable._process_wrapper_tester],
     )
@@ -113,7 +117,7 @@ process_wrapper_tester = rule(
             ],
         ),
         "use_param_file": attr.bool(
-            doc = "Whether or not to use a params file with the process wrapper.",
+            doc = "Whether to pass the wrapper's flags in a params file.",
             default = False,
         ),
         "_process_wrapper": attr.label(
