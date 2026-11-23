@@ -3685,6 +3685,26 @@ def _libraries_dirnames_pic(linker_input):
 def _libraries_dirnames_no_pic(linker_input):
     return _libraries_dirnames(linker_input, False)
 
+def _staticlib_alwayslink_flags(linker_input, use_pic, ambiguous_libs):
+    """Bundles alwayslink archives into a staticlib.
+
+    Link flags hand an alwayslink archive to the linker as whole-archive args,
+    but producing a staticlib runs no linker, so rustc drops them and the
+    archive's objects never reach the output. rustc bundles every object of a
+    `-lstatic` library into a staticlib, which is the same effect. Bazel names an
+    alwayslink archive `.lo`, which `-lstatic=<name>` does not search for, hence
+    `+verbatim`.
+    """
+    ret = []
+    for lib in linker_input.libraries:
+        if not lib.alwayslink or not (lib.static_library or lib.pic_static_library):
+            continue
+        artifact = get_preferred_artifact(lib, use_pic)
+        if ambiguous_libs and artifact in ambiguous_libs:
+            artifact = ambiguous_libs[artifact]
+        ret.append("-lstatic:+verbatim=%s" % artifact.basename)
+    return ret
+
 def _add_native_link_flags(
         args,
         dep_info,
@@ -3769,6 +3789,12 @@ def _add_native_link_flags(
         )),
         allow_closure = True,
     )
+    if crate_type == "staticlib" and include_link_flags and not link_libraries_as_link_args:
+        args.add_all(
+            dep_info.transitive_noncrates,
+            map_each = lambda linker_input: _staticlib_alwayslink_flags(linker_input, use_pic, ambiguous_libs),
+            allow_closure = True,
+        )
 
     args.add_all(linkstamp_outs, format_each = "-Clink-args=%s")
 
