@@ -125,6 +125,21 @@ def _staticlib_has_native_libs_test_impl(ctx):
     assert_argv_contains_prefix(env, action, "--codegen=linker=")
     return analysistest.end(env)
 
+def _staticlib_bundles_alwayslink_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    action = tut.actions[0]
+    toolchain = _get_toolchain(ctx)
+    compilation_mode = ctx.var["COMPILATION_MODE"]
+    pic_suffix = _get_pic_suffix(ctx, compilation_mode)
+    assert_argv_contains(env, action, "--crate-type=staticlib")
+    if toolchain.target_os == "windows":
+        alwayslink_archive = "alwayslink.lo.lib"
+    else:
+        alwayslink_archive = "libalwayslink{}.lo".format(pic_suffix)
+    assert_argv_contains(env, action, "-lstatic:+verbatim={}".format(alwayslink_archive))
+    return analysistest.end(env)
+
 def _proc_macro_has_native_libs_test_impl(ctx):
     env = analysistest.begin(ctx)
     tut = analysistest.target_under_test(env)
@@ -359,6 +374,9 @@ rlib_has_no_native_libs_test = analysistest.make(_rlib_has_no_native_libs_test_i
 staticlib_has_native_libs_test = analysistest.make(_staticlib_has_native_libs_test_impl, attrs = {
     "_toolchain": attr.label(default = Label("//rust/toolchain:current_rust_toolchain")),
 })
+staticlib_bundles_alwayslink_test = analysistest.make(_staticlib_bundles_alwayslink_test_impl, attrs = {
+    "_toolchain": attr.label(default = Label("//rust/toolchain:current_rust_toolchain")),
+})
 cdylib_has_native_libs_test = analysistest.make(_cdylib_has_native_libs_test_impl, attrs = {
     "_toolchain": attr.label(default = Label("//rust/toolchain:current_rust_toolchain")),
 })
@@ -444,6 +462,13 @@ def _native_dep_test():
         deps = [":native_dep"],
     )
 
+    rust_static_library(
+        name = "staticlib_has_native_dep_and_alwayslink",
+        srcs = ["lib_using_native_dep.rs"],
+        edition = "2018",
+        deps = [":native_dep", ":alwayslink"],
+    )
+
     rust_shared_library(
         name = "cdylib_has_native_dep",
         srcs = ["lib_using_native_dep.rs"],
@@ -501,6 +526,10 @@ def _native_dep_test():
     staticlib_has_native_libs_test(
         name = "staticlib_has_native_libs_test",
         target_under_test = ":staticlib_has_native_dep",
+    )
+    staticlib_bundles_alwayslink_test(
+        name = "staticlib_bundles_alwayslink_test",
+        target_under_test = ":staticlib_has_native_dep_and_alwayslink",
     )
     cdylib_has_native_libs_test(
         name = "cdylib_has_native_libs_test",
@@ -679,6 +708,7 @@ def native_deps_test_suite(name):
             ":native_linkopts_propagate_test",
             ":proc_macro_has_native_libs_test",
             ":rlib_has_no_native_libs_test",
+            ":staticlib_bundles_alwayslink_test",
             ":staticlib_has_native_libs_test",
         ],
     )
