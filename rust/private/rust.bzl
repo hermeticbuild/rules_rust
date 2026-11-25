@@ -605,7 +605,8 @@ def _maybe_wrap_sharded_test(ctx, providers, toolchain):
         if _is_default_info(provider):
             wrapped_providers.append(DefaultInfo(
                 files = provider.files,
-                runfiles = provider.default_runfiles.merge(ctx.runfiles(files = [test_binary])),
+                # In the runfiles too, so that a rule extending this one can find it.
+                runfiles = provider.default_runfiles.merge(ctx.runfiles(files = [test_binary, wrapper])),
                 executable = wrapper,
             ))
             replaced_default_info = True
