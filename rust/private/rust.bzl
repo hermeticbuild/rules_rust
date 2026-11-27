@@ -239,7 +239,7 @@ def _rust_library_common(ctx, crate_type):
         rustc_rmeta_output = generate_output_diagnostics(ctx, toolchain, rust_metadata)
         metadata_supports_pipelining = (
             can_use_metadata_for_pipelining(toolchain, crate_type) and
-            not ctx.attr.disable_pipelining
+            not getattr(ctx.attr, "disable_pipelining", False)
         )
 
     deps = transform_deps(deps)
