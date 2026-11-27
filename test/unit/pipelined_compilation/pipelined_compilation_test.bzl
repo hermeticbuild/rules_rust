@@ -1,7 +1,10 @@
 """Unittests for rust rules."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_macro")
+load("//rust:defs.bzl", "rust_binary", "rust_common", "rust_library", "rust_proc_macro")
+
+# buildifier: disable=bzl-visibility
+load("//rust/private:rust.bzl", "rust_library_without_process_wrapper")
 load("//test/unit:common.bzl", "assert_argv_contains", "assert_env_value")
 load(":wrap.bzl", "wrap")
 
@@ -370,6 +373,40 @@ def _disable_pipelining_test():
         ":rmeta_not_produced_if_pipelining_disabled_test",
     ]
 
+def _rmeta_produced_without_disable_pipelining_attr_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+
+    metadata_actions = [act for act in tut.actions if act.mnemonic == "RustcMetadata"]
+    asserts.equals(env, 1, len(metadata_actions), "expected one RustcMetadata action")
+    asserts.true(
+        env,
+        tut[rust_common.crate_info].metadata_supports_pipelining,
+        "expected metadata_supports_pipelining when the rule has no disable_pipelining attribute",
+    )
+
+    return analysistest.end(env)
+
+rmeta_produced_without_disable_pipelining_attr_test = analysistest.make(_rmeta_produced_without_disable_pipelining_attr_test_impl, config_settings = ENABLE_PIPELINING)
+
+def _without_disable_pipelining_attr_test():
+    # This rule has no `disable_pipelining` attribute, yet tinyjson uses it outside
+    # the bootstrap transition as a dependency of the cargo build script runner.
+    rust_library_without_process_wrapper(
+        name = "lib_without_process_wrapper",
+        srcs = ["first.rs"],
+        edition = "2021",
+    )
+    rmeta_produced_without_disable_pipelining_attr_test(
+        name = "rmeta_produced_for_library_without_process_wrapper_test",
+        target_under_test = ":lib_without_process_wrapper",
+        target_compatible_with = _NO_WINDOWS,
+    )
+
+    return [
+        ":rmeta_produced_for_library_without_process_wrapper_test",
+    ]
+
 def _custom_rule_test(generate_metadata, suffix):
     rust_library(
         name = "to_wrap" + suffix,
@@ -444,6 +481,7 @@ def pipelined_compilation_test_suite(name):
     tests = []
     tests.extend(_pipelined_compilation_test())
     tests.extend(_disable_pipelining_test())
+    tests.extend(_without_disable_pipelining_attr_test())
     tests.extend(_custom_rule_test(generate_metadata = True, suffix = "_with_metadata"))
     tests.extend(_custom_rule_test(generate_metadata = False, suffix = "_without_metadata"))
     tests.extend(_unexpanded_rustc_env_test())
